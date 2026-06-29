@@ -1,0 +1,63 @@
+# CI/CD to Plesk
+
+This project deploys with GitHub Actions over SSH/rsync.
+
+## Plesk setup
+
+1. Create a Node.js application in Plesk.
+2. Set the application root to the same folder used by `PLESK_DEPLOY_PATH`.
+3. Set the startup file to `dist/src/main.js`, or set the start command to `yarn start:prod` if your Plesk panel supports commands.
+4. Add production environment variables in Plesk:
+   - `DATABASE_URL`
+   - `JWT_SECRET`
+   - `PORT`
+   - `LINE_CHANNEL_ACCESS_TOKEN`
+   - `LINE_LOGIN_CHANNEL_ID`
+   - `LINE_LOGIN_CHANNEL_SECRET`
+   - `DEPLOY_DATABASE_MODE`
+5. Make sure SSH access is enabled for the subscription user.
+
+If SSH cannot find Node/Yarn because Plesk does not load the Node path in non-interactive sessions, set:
+
+```bash
+NODE_BIN_DIR=/opt/plesk/node/24/bin
+```
+
+Adjust `24` to the Node version installed in Plesk.
+
+## GitHub secrets
+
+Add these secrets in GitHub repository settings:
+
+```text
+PLESK_HOST=example.com
+PLESK_PORT=22
+PLESK_USER=ssh-user
+PLESK_SSH_KEY=<private deploy key>
+PLESK_DEPLOY_PATH=/var/www/vhosts/example.com/behavior-service
+HEALTHCHECK_URL=https://api.example.com/docs
+```
+
+`HEALTHCHECK_URL` is optional.
+
+## Database mode
+
+The deploy script reads `DEPLOY_DATABASE_MODE` from the Plesk app environment:
+
+- `migrate`: runs `prisma migrate deploy` only when `prisma/migrations` exists.
+- `push`: runs `prisma db push`.
+- `skip`: does not update the database.
+
+This repository currently has `prisma/schema.prisma` but no migration folder, so the first production deploy should either add real migrations or set `DEPLOY_DATABASE_MODE=push` intentionally.
+
+## Deploy flow
+
+On push to `main` or `master`, GitHub Actions will:
+
+1. Install dependencies.
+2. Generate Prisma Client.
+3. Run tests.
+4. Build the NestJS app.
+5. Upload source files to Plesk with rsync.
+6. Run `scripts/plesk-deploy.sh` on the server.
+7. Run the optional health check.

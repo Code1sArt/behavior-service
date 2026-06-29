@@ -1,0 +1,13 @@
+.git/
+.github/
+.env
+.env.*
+node_modules/
+dist/
+coverage/
+.nyc_output/
+.DS_Store
+*.log
+Archive.zip
+README.md
+docker-compose.yml

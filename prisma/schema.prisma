@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+  AFFAIRS
+  ADMIN
+  PARENT
+}
+
+enum AttendanceType {
+  ASSEMBLY // เข้าแถว
+  AREA // เขตพื้นที่
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE // มาสาย (จะถูกใช้ใน Service เพื่อหัก 1 คะแนนอัตโนมัติ)
+  ABSENT // ขาดเรียน (จะถูกใช้ใน Service เพื่อหัก 2 คะแนนอัตโนมัติ)
+  LEAVE
+}
+
+enum PointType {
+  ADD
+  DEDUCT
+}
+
+// -------------------------------------------------------------
+// Core Models
+// -------------------------------------------------------------
+
+model User {
+  id         String  @id @default(uuid())
+  citizenId  String  @unique // รหัสบัตรประชาชน หรือรหัสนักเรียน
+  firstName  String
+  lastName   String
+  role       Role
+  password   String
+  lineUserId String? @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
+
+  // Relations
+  classroom   Classroom? @relation("StudentClassroom", fields: [classroomId], references: [id])
+  classroomId Int?
+
+  advisingClasses Classroom[] @relation("ClassroomAdvisors")
+
+  // สำหรับผู้ปกครองและนักเรียน (Parent-Child relation)
+  parentId String?
+  parent   User?   @relation("ParentToStudent", fields: [parentId], references: [id])
+  children User[]  @relation("ParentToStudent")
+
+  // บันทึกที่เกี่ยวข้อง
+  attendanceLogs     AttendanceRecord[] @relation("StudentAttendance")
+  attendanceRecorded AttendanceRecord[] @relation("RecorderAttendance")
+  behaviorLogs       BehaviorRecord[]   @relation("StudentBehavior")
+  behaviorRecorded   BehaviorRecord[]   @relation("RecorderBehavior")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ตารางสำหรับเก็บการตั้งค่าระบบส่วนกลาง
+model SystemConfig {
+  key       String   @id // เช่น "ATTENDANCE_CUTOFF_TIME"
+  value     String // เช่น "08:30"
+  updatedAt DateTime @updatedAt
+}
+
+model AcademicTerm {
+  id        Int      @id @default(autoincrement())
+  term      Int // เช่น 1 หรือ 2
+  year      Int // เช่น 2569
+  startDate DateTime @db.Date // วันที่เริ่มต้นของปีการศึกษา
+  endDate   DateTime @db.Date // วันที่สิ้นสุดของปีการศึกษา
+  isActive  Boolean  @default(false)
+
+  holidays    AcademicHoliday[] // วันหยุดในปีการศึกษานี้
+  attendances AttendanceRecord[] // บันทึกการเข้าแถวและเขตพื้นที่ในปีการศึกษานี้
+  classrooms Classroom[] // ห้องเรียนในปีการศึกษานี้
+
+  @@unique([year, term]) // ป้องกันการสร้างปีการศึกษาและเทอมซ้ำกัน
+}
+
+model AcademicHoliday {
+  id             Int      @id @default(autoincrement())
+  date           DateTime @db.Date
+  name           String // เช่น วันเข้าพรรษา, วันปีใหม่
+  academicTermId Int
+
+  academicTerm AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
+
+  @@unique([academicTermId, date]) // ป้องกันการบันทึกวันหยุดซ้ำกันในปีการศึกษาเดียวกัน
+  @@index([date]) // เพื่อให้ค้นหาวันหยุดได้เร็วขึ้น
+}
+
+model Classroom {
+  id                   Int    @id @default(autoincrement())
+  name                 String // เช่น ม.6/5
+  startingPoints       Int    @default(100)
+  failingThreshold     Int // ระดับคะแนนที่ไม่ผ่านเกณฑ์
+  certificateThreshold Int // ระดับคะแนนที่ได้เกียรติบัตร
+  shieldThreshold      Int // ระดับคะแนนที่ได้โล่
+
+  // <--- 2. เพิ่ม 2 บรรทัดนี้ เพื่อผูกกับปีการศึกษา
+  termId Int
+  term   AcademicTerm @relation(fields: [termId], references: [id])
+
+  // 2. ลบ advisorId และ advisor ตัวเก่าทิ้งไปเลย แล้วแทนที่ด้วยฟิลด์นี้:
+  advisors User[] @relation("ClassroomAdvisors")
+
+  students User[] @relation("StudentClassroom")
+}
+
+// -------------------------------------------------------------
+// Behavior & Attendance Models
+// -------------------------------------------------------------
+
+model PointCategory {
+  id            Int       @id @default(autoincrement())
+  name          String // เช่น "ช่วยเหลืองานโรงเรียน", "ทะเลาะวิวาท"
+  type          PointType
+  defaultPoints Int // จำนวนคะแนนตั้งต้น
+
+  // การอนุญาตให้เพิ่ม/ลบคะแนน
+  allowedForTeacher Boolean @default(false)
+  allowedForAffairs Boolean @default(false)
+
+  records BehaviorRecord[]
+}
+
+model AttendanceRecord {
+  id     String           @id @default(uuid())
+  type   AttendanceType
+  status AttendanceStatus
+  date   DateTime         @default(now())
+
+  studentId String
+  student   User   @relation("StudentAttendance", fields: [studentId], references: [id])
+
+  recorderId String
+  recorder   User   @relation("RecorderAttendance", fields: [recorderId], references: [id])
+
+  termId Int
+  term   AcademicTerm @relation(fields: [termId], references: [id])
+}
+
+model BehaviorRecord {
+  id        String   @id @default(uuid())
+  points    Int // จำนวนคะแนนที่เพิ่มหรือหัก (เก็บแยกไว้เผื่อมีการแก้ defaultPoints ในอนาคต)
+  note      String? // หมายเหตุเพิ่มเติม
+  createdAt DateTime @default(now())
+
+  categoryId Int? // สามารถเป็น Null ได้ในกรณีที่เป็นการหักคะแนนอัตโนมัติจากการมาสาย
+  category   PointCategory? @relation(fields: [categoryId], references: [id])
+
+  studentId String
+  student   User   @relation("StudentBehavior", fields: [studentId], references: [id])
+
+  recorderId String // คนที่บันทึก (ครู, ฝ่ายกิจการ, หรือ system สำหรับ auto-deduct)
+  recorder   User   @relation("RecorderBehavior", fields: [recorderId], references: [id])
+}

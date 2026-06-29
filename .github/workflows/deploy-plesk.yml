@@ -1,0 +1,66 @@
+name: Deploy to Plesk
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: plesk-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Test, build, and deploy
+    runs-on: ubuntu-latest
+    env:
+      PLESK_PORT: ${{ secrets.PLESK_PORT || '22' }}
+      HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: yarn prisma generate
+
+      - name: Test
+        run: yarn test --runInBand
+
+      - name: Build
+        run: yarn build
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PLESK_SSH_KEY }}" > ~/.ssh/plesk_deploy_key
+          chmod 600 ~/.ssh/plesk_deploy_key
+          ssh-keyscan -p "$PLESK_PORT" "${{ secrets.PLESK_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload source to Plesk
+        run: |
+          rsync -az --delete \
+            --exclude-from=.deployignore \
+            -e "ssh -i ~/.ssh/plesk_deploy_key -p $PLESK_PORT" \
+            ./ "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}:${{ secrets.PLESK_DEPLOY_PATH }}/"
+
+      - name: Run remote deploy
+        run: |
+          ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && bash scripts/plesk-deploy.sh"
+
+      - name: Health check
+        if: ${{ env.HEALTHCHECK_URL != '' }}
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 5 "$HEALTHCHECK_URL"
