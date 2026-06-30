@@ -20,7 +20,7 @@ async function bootstrap() {
   // ตั้งค่า Swagger
   // ==========================================
   const config = new DocumentBuilder()
-    .setTitle('Smart School API - Behavior Service')
+    .setTitle('Smart School API - Behavior Services')
     .setDescription('คู่มือการใช้งาน API สำหรับระบบบันทึกคะแนนพฤติกรรมนักเรียน')
     .setVersion('1.0')
     .addBearerAuth() // เปิดปุ่มให้ใส่ Token JWT ได้
