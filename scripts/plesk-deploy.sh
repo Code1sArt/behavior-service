@@ -6,6 +6,15 @@ cd "$APP_ROOT"
 
 export NODE_ENV="${NODE_ENV:-production}"
 
+if [[ -z "${NODE_BIN_DIR:-}" ]] && [[ -f "$APP_ROOT/.nvmrc" ]]; then
+  NODE_MAJOR="$(tr -d '[:space:]' < "$APP_ROOT/.nvmrc" | cut -d. -f1)"
+  PLESK_NODE_BIN="/opt/plesk/node/${NODE_MAJOR}/bin"
+
+  if [[ -x "$PLESK_NODE_BIN/node" ]]; then
+    NODE_BIN_DIR="$PLESK_NODE_BIN"
+  fi
+fi
+
 if [[ -n "${NODE_BIN_DIR:-}" ]]; then
   export PATH="$NODE_BIN_DIR:$PATH"
 fi

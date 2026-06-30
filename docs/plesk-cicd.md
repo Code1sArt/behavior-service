@@ -17,7 +17,8 @@ This project deploys with GitHub Actions over SSH/rsync.
    - `DEPLOY_DATABASE_MODE`
 5. Make sure SSH access is enabled for the subscription user.
 
-If SSH cannot find Node/Yarn because Plesk does not load the Node path in non-interactive sessions, set:
+The deploy script reads `.nvmrc` and automatically adds the matching Plesk
+Node.js installation to `PATH`. To override the detected location, set:
 
 ```bash
 NODE_BIN_DIR=/opt/plesk/node/24/bin
