@@ -83,6 +83,6 @@ export class BehaviorsController {
         @Req() req: any
     ) {
         // ตรวจสอบว่ามีไฟล์และมีข้อมูล User จาก Token
-        return await this.behaviorsService.importFromExcel(file, req.user.id);
+        return await this.behaviorsService.importFromExcel(file, req.user.userId);
     }
 }
