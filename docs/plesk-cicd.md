@@ -34,7 +34,7 @@ PLESK_HOST=example.com
 PLESK_PORT=22
 PLESK_USER=ssh-user
 PLESK_SSH_KEY=<private deploy key>
-PLESK_DEPLOY_PATH=/var/www/vhosts/example.com/behavior-service
+PLESK_DEPLOY_PATH=/var/www/vhosts/dspscare.com/behavior-service
 HEALTHCHECK_URL=https://api.example.com/docs
 ```
 
