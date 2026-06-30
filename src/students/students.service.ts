@@ -53,6 +53,51 @@ export class StudentsService {
     });
   }
 
+  async search(query: string, limit = 30) {
+    const normalizedQuery = query?.trim();
+
+    if (!normalizedQuery) {
+      throw new BadRequestException('กรุณาระบุคำค้นหา');
+    }
+
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('limit ต้องอยู่ระหว่าง 1 ถึง 100');
+    }
+
+    const searchTerms = normalizedQuery.split(/\s+/);
+
+    return this.prisma.user.findMany({
+      where: {
+        role: Role.STUDENT,
+        AND: searchTerms.map((term) => ({
+          OR: [
+            { citizenId: { contains: term } },
+            { firstName: { contains: term } },
+            { lastName: { contains: term } },
+          ],
+        })),
+      },
+      take: limit,
+      select: {
+        id: true,
+        citizenId: true,
+        firstName: true,
+        lastName: true,
+        classroomId: true,
+        classroom: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: [
+        { firstName: 'asc' },
+        { lastName: 'asc' },
+      ],
+    });
+  }
+
   async findOne(id: string) {
     const student = await this.prisma.user.findFirst({
       where: { id, role: Role.STUDENT },

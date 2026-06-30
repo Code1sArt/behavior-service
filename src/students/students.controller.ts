@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, UseInterceptors, UploadedFile, ParseFilePipe, FileTypeValidator, MaxFileSizeValidator } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, UseInterceptors, UploadedFile, ParseFilePipe, FileTypeValidator, MaxFileSizeValidator, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { StudentsService } from './students.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -29,6 +29,17 @@ export class StudentsController {
     @ApiOperation({ summary: 'ดูรายชื่อนักเรียนทั้งหมด' })
     findAll(@Query('classroomId') classroomId?: string) {
         return this.studentsService.findAll(classroomId ? +classroomId : undefined);
+    }
+
+    @Get('search')
+    @ApiOperation({ summary: 'ค้นหานักเรียนด้วยรหัสนักเรียน ชื่อ หรือนามสกุล' })
+    @ApiQuery({ name: 'q', required: true, example: 'สมชาย' })
+    @ApiQuery({ name: 'limit', required: false, example: 30, description: 'จำนวนผลลัพธ์ 1-100 รายการ' })
+    search(
+        @Query('q') q: string,
+        @Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit: number,
+    ) {
+        return this.studentsService.search(q, limit);
     }
 
     @Patch(':id')
