@@ -29,7 +29,7 @@ if ! command -v yarn >/dev/null 2>&1; then
   corepack enable
 fi
 
-yarn install --frozen-lockfile
+yarn install --frozen-lockfile --production=false
 yarn prisma generate
 
 case "${DEPLOY_DATABASE_MODE:-migrate}" in
