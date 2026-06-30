@@ -10,7 +10,7 @@ import { Role } from '@prisma/client';
 import { FileInterceptor } from '@nestjs/platform-express';
 import 'multer';
 
-@ApiTags('Students Management')
+@ApiTags('Students Management : การจัดการนักเรียน')
 @ApiBearerAuth()
 // @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('students')
