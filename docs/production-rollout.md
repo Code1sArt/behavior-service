@@ -39,17 +39,17 @@ Push the reviewed backend release commit to `main`, or manually dispatch its
 workflow. The prepare deployment uploads source and installs dependencies, but
 keeps the existing `dist` and running process unchanged.
 
-SSH to the backend application directory and inspect migration state:
+The next reviewed deployment mode is:
 
-```bash
-yarn prisma migrate status
+```text
+DEPLOY_DATABASE_MODE=baseline
+DEPLOY_APP_MODE=prepare
 ```
 
-For an existing database that predates Prisma Migrate, register the original
-schema exactly once:
+Dispatch the backend workflow. It runs a read-only legacy-schema preflight and
+then registers the original schema exactly once:
 
 ```bash
-yarn prisma migrate resolve --applied 0_baseline
 yarn prisma migrate status
 ```
 

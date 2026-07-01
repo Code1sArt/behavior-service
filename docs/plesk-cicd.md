@@ -50,6 +50,7 @@ the deployment gates are stored in the non-secret
 `scripts/deploy-mode.env` file:
 
 - `migrate`: runs `prisma migrate deploy` only when `prisma/migrations` exists.
+- `baseline`: verifies the legacy schema and registers `0_baseline`.
 - `skip`: does not update the database.
 
 This repository has a Prisma Migrate history beginning with `0_baseline`.
