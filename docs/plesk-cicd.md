@@ -51,6 +51,7 @@ the deployment gates are stored in the non-secret
 
 - `migrate`: runs `prisma migrate deploy` only when `prisma/migrations` exists.
 - `baseline`: verifies the legacy schema and registers `0_baseline`.
+- `backfill-dry-run`: reports the history backfill plan without writing data.
 - `skip`: does not update the database.
 
 This repository has a Prisma Migrate history beginning with `0_baseline`.

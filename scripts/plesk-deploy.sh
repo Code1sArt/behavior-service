@@ -41,6 +41,9 @@ yarn install --frozen-lockfile --production=false
 yarn prisma generate
 
 case "${DEPLOY_DATABASE_MODE:-skip}" in
+  backfill-dry-run)
+    yarn db:backfill:student-history
+    ;;
   baseline)
     yarn db:check:baseline
     yarn prisma migrate resolve --applied 0_baseline
@@ -57,7 +60,7 @@ case "${DEPLOY_DATABASE_MODE:-skip}" in
     echo "Skipping database update."
     ;;
   *)
-    echo "Unsupported DEPLOY_DATABASE_MODE=${DEPLOY_DATABASE_MODE}. Use baseline, migrate, or skip." >&2
+    echo "Unsupported DEPLOY_DATABASE_MODE=${DEPLOY_DATABASE_MODE}. Use backfill-dry-run, baseline, migrate, or skip." >&2
     exit 1
     ;;
 esac
