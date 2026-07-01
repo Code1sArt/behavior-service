@@ -8,8 +8,12 @@ import { AttendanceService } from './attendance.service';
 describe('AttendanceService', () => {
   const findActiveTerm = jest.fn();
   const getSchoolDayStatus = jest.fn();
+  const findClassrooms = jest.fn();
+  const findAttendanceRecords = jest.fn();
   const prisma = {
     academicTerm: { findFirst: findActiveTerm },
+    classroom: { findMany: findClassrooms },
+    attendanceRecord: { findMany: findAttendanceRecords },
   } as unknown as PrismaService;
   const lineService = {} as LineService;
   const academicCalendarService = {
@@ -28,6 +32,8 @@ describe('AttendanceService', () => {
   beforeEach(() => {
     findActiveTerm.mockReset();
     getSchoolDayStatus.mockReset();
+    findClassrooms.mockReset();
+    findAttendanceRecords.mockReset();
   });
 
   it('rejects attendance when there is no active term', async () => {
@@ -72,6 +78,30 @@ describe('AttendanceService', () => {
       },
       details: [],
     });
+  });
+
+  it('returns the first names of all classroom advisors', async () => {
+    findActiveTerm.mockResolvedValue({ id: 1 });
+    getSchoolDayStatus.mockResolvedValue({
+      isSchoolDay: true,
+      reason: null,
+    });
+    findClassrooms.mockResolvedValue([
+      {
+        id: 1,
+        name: 'ม.1/1',
+        advisors: [
+          { firstName: 'สมชาย', lastName: 'ใจดี', lineUserId: null },
+          { firstName: 'สมศรี', lastName: 'ใจงาม', lineUserId: null },
+        ],
+        students: [{ id: 'student-1' }],
+      },
+    ]);
+    findAttendanceRecords.mockResolvedValue([]);
+
+    const result = await service.getMissingAttendanceClassrooms('2026-06-22');
+
+    expect(result.details[0].advisorName).toBe('สมชาย, สมศรี');
   });
 
   it('skips LINE notifications when the date is not a school day', async () => {

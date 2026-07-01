@@ -457,13 +457,16 @@ export class AttendanceService {
         const allDetails = classrooms.map(room => {
             const studentIds = room.students.map(s => s.id);
             const studentCount = studentIds.length;
+            const advisorName = room.advisors.length > 0
+                ? room.advisors.map(advisor => advisor.firstName).join(', ')
+                : 'ไม่มีที่ปรึกษา';
 
             // ถ้าห้องนี้ยังไม่มีนักเรียนเลย ให้เซ็ตเป็น true เพื่อข้ามการแจ้งเตือน
             if (studentCount === 0) {
                 return {
                     classroomId: room.id,
                     className: room.name,
-                    advisorName: room.advisors.length > 0 ? `${room.advisors[0].firstName} ${room.advisors[0].lastName}` : 'ไม่มีที่ปรึกษา',
+                    advisorName,
                     advisorLineId: room.advisors.length > 0 ? room.advisors[0].lineUserId : null,
                     studentCount: 0,
                     isAssemblyChecked: true,
@@ -478,7 +481,7 @@ export class AttendanceService {
             return {
                 classroomId: room.id,
                 className: room.name,
-                advisorName: room.advisors.length > 0 ? `${room.advisors[0].firstName} ${room.advisors[0].lastName}` : 'ไม่มีที่ปรึกษา',
+                advisorName,
                 advisorLineId: room.advisors.length > 0 ? room.advisors[0].lineUserId : null,
                 studentCount,
                 isAssemblyChecked,
