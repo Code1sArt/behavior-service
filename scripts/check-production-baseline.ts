@@ -1,4 +1,5 @@
 import mariadb from 'mariadb';
+import 'dotenv/config';
 
 const databaseUrl = new URL(process.env.DATABASE_URL as string);
 const databaseName = databaseUrl.pathname.slice(1);
