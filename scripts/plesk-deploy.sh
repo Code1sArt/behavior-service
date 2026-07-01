@@ -6,6 +6,14 @@ cd "$APP_ROOT"
 
 export NODE_ENV="${NODE_ENV:-production}"
 
+# Plesk Node.js custom variables belong to the application process and are not
+# guaranteed to exist in a non-interactive SSH session. Keep release gates in a
+# versioned, non-secret file so CI always uses the reviewed deployment mode.
+if [[ -f "$APP_ROOT/scripts/deploy-mode.env" ]]; then
+  # shellcheck disable=SC1091
+  source "$APP_ROOT/scripts/deploy-mode.env"
+fi
+
 if [[ -z "${NODE_BIN_DIR:-}" ]] && [[ -f "$APP_ROOT/.nvmrc" ]]; then
   NODE_MAJOR="$(tr -d '[:space:]' < "$APP_ROOT/.nvmrc" | cut -d. -f1)"
   PLESK_NODE_BIN="/opt/plesk/node/${NODE_MAJOR}/bin"
@@ -32,7 +40,7 @@ fi
 yarn install --frozen-lockfile --production=false
 yarn prisma generate
 
-case "${DEPLOY_DATABASE_MODE:-migrate}" in
+case "${DEPLOY_DATABASE_MODE:-skip}" in
   migrate)
     if [[ -d prisma/migrations ]] && find prisma/migrations -mindepth 1 -maxdepth 1 -type d | read -r _; then
       yarn prisma migrate deploy
@@ -50,7 +58,7 @@ case "${DEPLOY_DATABASE_MODE:-migrate}" in
     ;;
 esac
 
-case "${DEPLOY_APP_MODE:-release}" in
+case "${DEPLOY_APP_MODE:-prepare}" in
   prepare)
     echo "Prepare mode completed. The running application was not rebuilt or restarted."
     exit 0

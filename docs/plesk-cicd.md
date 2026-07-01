@@ -42,9 +42,12 @@ HEALTHCHECK_URL=https://api.example.com/docs
 
 `HEALTHCHECK_URL` is optional.
 
-## Database mode
+## Deployment mode
 
-The deploy script reads `DEPLOY_DATABASE_MODE` from the Plesk app environment:
+Plesk custom variables are available to the Node.js application but may not be
+exported to the non-interactive SSH session used by GitHub Actions. Therefore
+the deployment gates are stored in the non-secret
+`scripts/deploy-mode.env` file:
 
 - `migrate`: runs `prisma migrate deploy` only when `prisma/migrations` exists.
 - `skip`: does not update the database.
@@ -55,8 +58,6 @@ Before the first deployment to an existing database, follow
 Keep `DEPLOY_DATABASE_MODE=skip` until that registration is complete. Afterwards,
 set it permanently to `migrate`; do not use `push` for shared or production
 databases.
-
-## Application mode
 
 `DEPLOY_APP_MODE` controls whether the uploaded source replaces the running
 application:

@@ -24,7 +24,7 @@ The Admin frontend must be released last.
 - Restore that backup to a disposable database and confirm it opens.
 - Record the current backend and frontend commit IDs for application rollback.
 - Confirm the backend health-check URL and Plesk restart method.
-- Set these backend Plesk variables:
+- Confirm `scripts/deploy-mode.env` contains:
 
 ```text
 DEPLOY_DATABASE_MODE=skip
@@ -58,7 +58,7 @@ already contains only part of the new history/promotion schema.
 
 ## Gate 3: additive migration
 
-Change the backend Plesk variables to:
+Change `scripts/deploy-mode.env` to:
 
 ```text
 DEPLOY_DATABASE_MODE=migrate
@@ -105,7 +105,7 @@ The number of matched students must equal the number of students and
 
 ## Gate 5: backend release
 
-Set:
+Change `scripts/deploy-mode.env` to:
 
 ```text
 DEPLOY_DATABASE_MODE=migrate
