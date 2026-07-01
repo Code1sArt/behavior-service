@@ -1,6 +1,6 @@
-import { Controller, Get, Param, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards, ParseIntPipe, Query } from '@nestjs/common';
 import { SummaryService } from './summary.service';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -31,7 +31,12 @@ export class SummaryController {
     @Get('school-wide')
     @Roles(Role.ADMIN, Role.AFFAIRS) // ให้สิทธิ์เฉพาะผู้ดูแลระบบและฝ่ายกิจการ
     @ApiOperation({ summary: 'สรุปผลคะแนนทั้งโรงเรียน (แยกกลุ่มผ่าน, ตก, เกียรติบัตร, โล่)' })
-    getSchoolWide() {
-        return this.summaryService.getSchoolWideSummary();
+    @ApiQuery({ name: 'termId', required: false, type: Number })
+    @ApiQuery({ name: 'classroomId', required: false, type: Number })
+    getSchoolWide(
+        @Query('termId', new ParseIntPipe({ optional: true })) termId?: number,
+        @Query('classroomId', new ParseIntPipe({ optional: true })) classroomId?: number,
+    ) {
+        return this.summaryService.getSchoolWideSummary(termId, classroomId);
     }
 }

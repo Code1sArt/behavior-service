@@ -1,7 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { PointType, Prisma } from '@prisma/client';
-import { log } from 'console';
+import { PointType } from '@prisma/client';
 
 @Injectable()
 export class SummaryService {
@@ -9,15 +8,11 @@ export class SummaryService {
 
     // ฟังก์ชันช่วยคำนวณคะแนนสุทธิ
     private calculateNetScore(startingPoints: number, records: any[]) {
-        console.log("ssss", records);
-        
         return records.reduce((acc, record) => {
             // ตรวจสอบว่าหมวดหมู่เป็นแบบเพิ่มหรือหักคะแนน
             if (record.category?.type === PointType.ADD) {
-                console.log("asas");
                 return acc + record.points;
             } else {
-                console.log("ssss");
                 return acc - record.points;
             }
         }, startingPoints);
@@ -25,7 +20,7 @@ export class SummaryService {
 
     // ฟังก์ชันช่วยตัดสินสถานะตามเกณฑ์ของห้องเรียนนั้นๆ
     private determineStatus(score: number, classroom: any) {
-        if (score < classroom.startingPoints) return 'FAILED';
+        if (score < classroom.failingThreshold) return 'FAILED';
         if (score >= classroom.shieldThreshold) return 'SHIELD';
         if (score >= classroom.certificateThreshold) return 'CERTIFICATE';
         return 'NORMAL';
@@ -44,9 +39,6 @@ export class SummaryService {
         if (!student || !student.classroom) {
             throw new NotFoundException('ไม่พบข้อมูลนักเรียนหรือข้อมูลห้องเรียน');
         }
-
-        // console.log(student);
-        
 
         const currentScore = this.calculateNetScore(
             student.classroom.startingPoints,
@@ -116,9 +108,13 @@ export class SummaryService {
 
 
     // 3. สรุปภาพรวมทั้งโรงเรียน (แยกกลุ่มตามเกณฑ์)
-    async getSchoolWideSummary() {
+    async getSchoolWideSummary(termId?: number, classroomId?: number) {
         // ดึงข้อมูลห้องเรียนทั้งหมด พร้อมนักเรียนและประวัติคะแนน
         const classrooms = await this.prisma.classroom.findMany({
+            where: {
+                ...(termId !== undefined && { termId }),
+                ...(classroomId !== undefined && { id: classroomId }),
+            },
             include: {
                 students: {
                     where: { role: 'STUDENT' },
