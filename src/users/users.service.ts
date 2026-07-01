@@ -27,6 +27,25 @@ export class UsersService {
             throw new NotFoundException('ไม่พบข้อมูลผู้ใช้งานที่ต้องการแก้ไข');
         }
 
+        if (
+            existingUser.role === Role.STUDENT &&
+            dto.classroomId !== undefined &&
+            dto.classroomId !== existingUser.classroomId
+        ) {
+            throw new BadRequestException(
+                'กรุณาย้ายห้องนักเรียนผ่าน API จัดการนักเรียน เพื่อให้ระบบเก็บประวัติห้องเรียน',
+            );
+        }
+        if (
+            dto.role !== undefined &&
+            dto.role !== existingUser.role &&
+            (dto.role === Role.STUDENT || existingUser.role === Role.STUDENT)
+        ) {
+            throw new BadRequestException(
+                'ไม่สามารถเปลี่ยนเข้า/ออกจากบทบาทนักเรียนผ่าน API ผู้ใช้งานทั่วไปได้',
+            );
+        }
+
         // 4. เตรียมข้อมูลที่จะอัปเดต
         const updateData: any = { ...dto };
 

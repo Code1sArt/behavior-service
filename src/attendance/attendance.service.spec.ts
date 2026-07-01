@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { AttendanceStatus, AttendanceType } from '@prisma/client';
+import { AttendanceStatus, AttendanceType, PointType } from '@prisma/client';
 import { AcademicCalendarService } from '../academic-calendar/academic-calendar.service';
 import { LineService } from '../line/line.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,10 +10,24 @@ describe('AttendanceService', () => {
   const getSchoolDayStatus = jest.fn();
   const findClassrooms = jest.fn();
   const findAttendanceRecords = jest.fn();
+  const findStudents = jest.fn();
+  const findPointCategory = jest.fn();
+  const createAttendances = jest.fn();
+  const createBehaviors = jest.fn();
+  const runTransaction = jest.fn((callback: (tx: unknown) => unknown) =>
+    callback({
+      attendanceRecord: { createMany: createAttendances },
+      behaviorRecord: { createMany: createBehaviors },
+    }),
+  );
   const prisma = {
     academicTerm: { findFirst: findActiveTerm },
     classroom: { findMany: findClassrooms },
     attendanceRecord: { findMany: findAttendanceRecords },
+    behaviorRecord: { createMany: createBehaviors },
+    user: { findMany: findStudents },
+    pointCategory: { findUnique: findPointCategory },
+    $transaction: runTransaction,
   } as unknown as PrismaService;
   const lineService = {} as LineService;
   const academicCalendarService = {
@@ -34,6 +48,11 @@ describe('AttendanceService', () => {
     getSchoolDayStatus.mockReset();
     findClassrooms.mockReset();
     findAttendanceRecords.mockReset();
+    findStudents.mockReset();
+    findPointCategory.mockReset();
+    createAttendances.mockReset();
+    createBehaviors.mockReset();
+    runTransaction.mockClear();
   });
 
   it('rejects attendance when there is no active term', async () => {
@@ -56,6 +75,62 @@ describe('AttendanceService', () => {
       'ไม่สามารถเช็คชื่อได้ เนื่องจากวันนี้ไม่ใช่วันเรียน (WEEKEND)',
     );
     expect(getSchoolDayStatus).toHaveBeenCalledWith(1, expect.anything());
+  });
+
+  it('writes classroom, term, and signed behavior points', async () => {
+    findActiveTerm.mockResolvedValue({ id: 1 });
+    getSchoolDayStatus.mockResolvedValue({
+      isSchoolDay: true,
+      reason: null,
+    });
+    findAttendanceRecords.mockResolvedValue([]);
+    findStudents.mockResolvedValue([
+      {
+        id: 'student-1',
+        firstName: 'สมชาย',
+        lastName: 'ใจดี',
+        lineUserId: null,
+        classroom: {
+          id: 10,
+          termId: 1,
+          startingPoints: 100,
+          term: {
+            isActive: true,
+            startDate: new Date('2026-05-01T00:00:00.000Z'),
+            endDate: new Date('2026-10-01T00:00:00.000Z'),
+          },
+        },
+      },
+    ]);
+    findPointCategory.mockResolvedValue({
+      defaultPoints: 2,
+      type: PointType.DEDUCT,
+    });
+    createAttendances.mockResolvedValue({ count: 1 });
+    createBehaviors.mockResolvedValue({ count: 1 });
+
+    await service.recordBulk('recorder-1', {
+      type: AttendanceType.ASSEMBLY,
+      records: [{ studentId: 'student-1', status: AttendanceStatus.LATE }],
+    });
+
+    expect(createAttendances).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          classroomId: 10,
+          termId: 1,
+        }),
+      ],
+    });
+    expect(createBehaviors).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          classroomId: 10,
+          termId: 1,
+          pointDelta: -2,
+        }),
+      ],
+    });
   });
 
   it('returns an empty missing report when the date is not a school day', async () => {
@@ -94,6 +169,7 @@ describe('AttendanceService', () => {
           { firstName: 'สมชาย', lastName: 'ใจดี', lineUserId: null },
           { firstName: 'สมศรี', lastName: 'ใจงาม', lineUserId: null },
         ],
+        enrollments: [],
         students: [{ id: 'student-1' }],
       },
     ]);
@@ -154,5 +230,45 @@ describe('AttendanceService', () => {
         AREA: [],
       },
     });
+  });
+
+  it('reads historical classroom snapshots instead of the current room', async () => {
+    findActiveTerm.mockResolvedValue({ id: 1 });
+    getSchoolDayStatus.mockResolvedValue({
+      isSchoolDay: true,
+      reason: null,
+    });
+    findAttendanceRecords.mockResolvedValue([
+      {
+        id: 'attendance-1',
+        type: AttendanceType.ASSEMBLY,
+        classroomId: 10,
+        classroom: { name: 'ม.1/1' },
+        student: {
+          id: 'student-1',
+          citizenId: '10001',
+          firstName: 'สมชาย',
+          lastName: 'ใจดี',
+          classroom: { name: 'ม.2/1' },
+        },
+        recorder: { firstName: 'ครู', lastName: 'หนึ่ง' },
+      },
+    ]);
+
+    const result = await service.getDailyHistory(
+      '2026-06-22',
+      10,
+      AttendanceType.ASSEMBLY,
+    );
+
+    expect(findAttendanceRecords).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          termId: 1,
+          classroomId: 10,
+        }),
+      }),
+    );
+    expect(result.records.ASSEMBLY[0].student.classroom.name).toBe('ม.1/1');
   });
 });

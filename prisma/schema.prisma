@@ -31,6 +31,39 @@ enum PointType {
   DEDUCT
 }
 
+enum EnrollmentStatus {
+  ACTIVE
+  ENDED
+}
+
+enum EnrollmentExitReason {
+  TERM_COMPLETED
+  PROMOTED
+  REPEATED
+  TRANSFERRED
+  GRADUATED
+}
+
+enum PromotionType {
+  TERM_ROLLOVER
+  ANNUAL_PROMOTION
+}
+
+enum PromotionStatus {
+  DRAFT
+  APPLIED
+  CANCELLED
+  FAILED
+}
+
+enum PromotionAction {
+  MOVE
+  REPEAT
+  GRADUATE
+  TRANSFER_OUT
+  SKIP
+}
+
 // -------------------------------------------------------------
 // Core Models
 // -------------------------------------------------------------
@@ -56,10 +89,16 @@ model User {
   children User[]  @relation("ParentToStudent")
 
   // บันทึกที่เกี่ยวข้อง
-  attendanceLogs     AttendanceRecord[] @relation("StudentAttendance")
-  attendanceRecorded AttendanceRecord[] @relation("RecorderAttendance")
-  behaviorLogs       BehaviorRecord[]   @relation("StudentBehavior")
-  behaviorRecorded   BehaviorRecord[]   @relation("RecorderBehavior")
+  attendanceLogs     AttendanceRecord[]   @relation("StudentAttendance")
+  attendanceRecorded AttendanceRecord[]   @relation("RecorderAttendance")
+  behaviorLogs       BehaviorRecord[]     @relation("StudentBehavior")
+  behaviorRecorded   BehaviorRecord[]     @relation("RecorderBehavior")
+  enrollments        StudentEnrollment[]
+  pointAccount       StudentPointAccount?
+  promotionItems     PromotionItem[]
+
+  promotionBatchesCreated PromotionBatch[] @relation("PromotionCreatedBy")
+  promotionBatchesApplied PromotionBatch[] @relation("PromotionAppliedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -82,7 +121,12 @@ model AcademicTerm {
 
   holidays    AcademicHoliday[] // วันหยุดในปีการศึกษานี้
   attendances AttendanceRecord[] // บันทึกการเข้าแถวและเขตพื้นที่ในปีการศึกษานี้
-  classrooms Classroom[] // ห้องเรียนในปีการศึกษานี้
+  classrooms  Classroom[] // ห้องเรียนในปีการศึกษานี้
+  behaviors   BehaviorRecord[]
+  enrollments StudentEnrollment[]
+
+  sourcePromotionBatches PromotionBatch[] @relation("PromotionSourceTerm")
+  targetPromotionBatches PromotionBatch[] @relation("PromotionTargetTerm")
 
   @@unique([year, term]) // ป้องกันการสร้างปีการศึกษาและเทอมซ้ำกัน
 }
@@ -115,6 +159,102 @@ model Classroom {
   advisors User[] @relation("ClassroomAdvisors")
 
   students User[] @relation("StudentClassroom")
+
+  enrollments       StudentEnrollment[]
+  attendanceRecords AttendanceRecord[]
+  behaviorRecords   BehaviorRecord[]
+
+  sourcePromotionItems PromotionItem[] @relation("PromotionSourceClassroom")
+  targetPromotionItems PromotionItem[] @relation("PromotionTargetClassroom")
+}
+
+model StudentPointAccount {
+  studentId     String   @id
+  initialPoints Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model StudentEnrollment {
+  id         String                @id @default(uuid())
+  status     EnrollmentStatus      @default(ACTIVE)
+  exitReason EnrollmentExitReason?
+  startedAt  DateTime              @default(now())
+  endedAt    DateTime?
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  classroomId Int
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+
+  termId Int
+  term   AcademicTerm @relation(fields: [termId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId, status])
+  @@index([classroomId])
+  @@index([termId])
+}
+
+model PromotionBatch {
+  id             String          @id @default(uuid())
+  idempotencyKey String?         @unique
+  type           PromotionType
+  status         PromotionStatus @default(DRAFT)
+  appliedAt      DateTime?
+
+  sourceTermId Int
+  sourceTerm   AcademicTerm @relation("PromotionSourceTerm", fields: [sourceTermId], references: [id], onDelete: Restrict)
+
+  targetTermId Int
+  targetTerm   AcademicTerm @relation("PromotionTargetTerm", fields: [targetTermId], references: [id], onDelete: Restrict)
+
+  createdById String
+  createdBy   User   @relation("PromotionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  appliedById String?
+  appliedBy   User?   @relation("PromotionAppliedBy", fields: [appliedById], references: [id], onDelete: SetNull)
+
+  items PromotionItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, sourceTermId, targetTermId])
+  @@index([sourceTermId])
+  @@index([targetTermId])
+  @@index([status])
+}
+
+model PromotionItem {
+  id     String          @id @default(uuid())
+  action PromotionAction @default(MOVE)
+  note   String?
+
+  batchId String
+  batch   PromotionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  sourceClassroomId Int
+  sourceClassroom   Classroom @relation("PromotionSourceClassroom", fields: [sourceClassroomId], references: [id], onDelete: Restrict)
+
+  targetClassroomId Int?
+  targetClassroom   Classroom? @relation("PromotionTargetClassroom", fields: [targetClassroomId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([batchId, studentId])
+  @@index([studentId])
+  @@index([sourceClassroomId])
+  @@index([targetClassroomId])
 }
 
 // -------------------------------------------------------------
@@ -148,6 +288,11 @@ model AttendanceRecord {
 
   termId Int
   term   AcademicTerm @relation(fields: [termId], references: [id])
+
+  classroomId Int?
+  classroom   Classroom? @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+
+  @@index([termId, classroomId, date])
 }
 
 model BehaviorRecord {
@@ -164,4 +309,16 @@ model BehaviorRecord {
 
   recorderId String // คนที่บันทึก (ครู, ฝ่ายกิจการ, หรือ system สำหรับ auto-deduct)
   recorder   User   @relation("RecorderBehavior", fields: [recorderId], references: [id])
+
+  // Snapshot สำหรับรักษาคะแนนและห้อง/ภาคเรียน ณ เวลาที่บันทึก
+  pointDelta Int?
+
+  classroomId Int?
+  classroom   Classroom? @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+
+  termId Int?
+  term   AcademicTerm? @relation(fields: [termId], references: [id], onDelete: Restrict)
+
+  @@index([termId, classroomId, createdAt])
+  @@index([studentId, createdAt])
 }

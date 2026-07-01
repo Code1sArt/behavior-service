@@ -21,6 +21,21 @@
   <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
   [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
+## Database migrations
+
+Prisma migration history starts at `prisma/migrations/0_baseline`. Existing
+databases must register this baseline before later migrations are deployed.
+Follow [docs/database-migrations.md](docs/database-migrations.md) and take a
+verified backup first. Do not use `prisma db push` on shared or production
+databases after the baseline is registered.
+
+The term rollover Preview/Apply workflow is documented in
+[docs/term-rollover.md](docs/term-rollover.md).
+Annual grade promotion is documented in
+[docs/annual-promotion.md](docs/annual-promotion.md).
+The staged production release checklist is documented in
+[docs/production-rollout.md](docs/production-rollout.md).
+
 ## Description
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.

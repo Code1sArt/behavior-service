@@ -18,7 +18,10 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:promotion:e2e": "ts-node scripts/test-promotion-e2e.ts",
+    "db:backfill:student-history": "ts-node scripts/backfill-student-history.ts",
+    "db:verify:student-scores": "ts-node scripts/verify-student-scores.ts"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.0",

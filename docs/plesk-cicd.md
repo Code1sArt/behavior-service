@@ -15,6 +15,7 @@ This project deploys with GitHub Actions over SSH/rsync.
    - `LINE_LOGIN_CHANNEL_ID`
    - `LINE_LOGIN_CHANNEL_SECRET`
    - `DEPLOY_DATABASE_MODE`
+   - `DEPLOY_APP_MODE`
 5. Make sure SSH access is enabled for the subscription user.
 
 The deploy script reads `.nvmrc` and automatically adds the matching Plesk
@@ -46,10 +47,27 @@ HEALTHCHECK_URL=https://api.example.com/docs
 The deploy script reads `DEPLOY_DATABASE_MODE` from the Plesk app environment:
 
 - `migrate`: runs `prisma migrate deploy` only when `prisma/migrations` exists.
-- `push`: runs `prisma db push`.
 - `skip`: does not update the database.
 
-This repository currently has `prisma/schema.prisma` but no migration folder, so the first production deploy should either add real migrations or set `DEPLOY_DATABASE_MODE=push` intentionally.
+This repository has a Prisma Migrate history beginning with `0_baseline`.
+Before the first deployment to an existing database, follow
+[`database-migrations.md`](database-migrations.md) and register the baseline.
+Keep `DEPLOY_DATABASE_MODE=skip` until that registration is complete. Afterwards,
+set it permanently to `migrate`; do not use `push` for shared or production
+databases.
+
+## Application mode
+
+`DEPLOY_APP_MODE` controls whether the uploaded source replaces the running
+application:
+
+- `prepare`: install dependencies, generate Prisma Client, and perform the
+  selected database action without rebuilding or restarting the app. The
+  currently deployed `dist` keeps serving traffic.
+- `release`: complete the build and restart after preparation checks pass.
+
+The first migration rollout must use the staged procedure in
+[`production-rollout.md`](production-rollout.md).
 
 ## Deploy flow
 

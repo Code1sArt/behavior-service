@@ -9,6 +9,11 @@ import { AcademicCalendarService } from '../academic-calendar/academic-calendar.
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
+import { calculateLegacyPointDelta } from '../points/score-calculator';
+import {
+    requireStudentAcademicContext,
+    requireStudentAcademicContexts,
+} from '../students/student-academic-context';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -25,6 +30,12 @@ export class AttendanceService {
         private lineService: LineService,
         private academicCalendarService: AcademicCalendarService,
     ) { }
+
+    private attendanceBehaviorNote(type: AttendanceType) {
+        const label =
+            type === AttendanceType.ASSEMBLY ? 'เข้าแถว' : 'เขตพื้นที่';
+        return `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${label}`;
+    }
 
     private async getActiveTermSchoolDayStatus(targetDate: dayjs.Dayjs) {
         const activeTerm = await this.prisma.academicTerm.findFirst({
@@ -44,6 +55,32 @@ export class AttendanceService {
         return { activeTerm, schoolDayStatus };
     }
 
+    private async getTermSchoolDayStatus(targetDate: dayjs.Dayjs) {
+        const term = await this.prisma.academicTerm.findFirst({
+            where: {
+                startDate: { lte: targetDate.endOf('day').toDate() },
+                endDate: { gte: targetDate.startOf('day').toDate() },
+            },
+        });
+
+        if (!term) {
+            return {
+                term: null,
+                schoolDayStatus: {
+                    isSchoolDay: false,
+                    reason: 'OUTSIDE_TERM',
+                },
+            };
+        }
+
+        const schoolDayStatus =
+            await this.academicCalendarService.getSchoolDayStatus(
+                term.id,
+                targetDate,
+            );
+        return { term, schoolDayStatus };
+    }
+
     // -------------------------------------------------------------
     // 1. ดึงประวัติการเช็คชื่อรายวัน (แยกตามห้อง และแบ่ง Type)
     // -------------------------------------------------------------
@@ -53,8 +90,8 @@ export class AttendanceService {
             ? dayjs.tz(dateStr, 'YYYY-MM-DD', 'Asia/Bangkok')
             : dayjs().tz('Asia/Bangkok');
 
-        const { schoolDayStatus } =
-            await this.getActiveTermSchoolDayStatus(targetDate);
+        const { term, schoolDayStatus } =
+            await this.getTermSchoolDayStatus(targetDate);
 
         if (!schoolDayStatus.isSchoolDay) {
             return {
@@ -77,10 +114,9 @@ export class AttendanceService {
                     gte: startOfDay,
                     lte: endOfDay,
                 },
+                termId: term!.id,
                 type: type ? type : undefined, // ถ้าส่ง type มาก็กรอง ถ้าไม่ส่งมาคือดึงทั้งหมด
-                student: {
-                    classroomId: classroomId ? Number(classroomId) : undefined,
-                },
+                classroomId: classroomId ? Number(classroomId) : undefined,
             },
             include: {
                 student: {
@@ -92,15 +128,26 @@ export class AttendanceService {
                         classroom: { select: { name: true } },
                     },
                 },
+                classroom: { select: { name: true } },
                 recorder: {
                     select: { firstName: true, lastName: true },
                 },
             },
             orderBy: [
-                { student: { classroom: { name: 'asc' } } },
+                { classroom: { name: 'asc' } },
                 { student: { firstName: 'asc' } },
             ],
         });
+        const recordsWithSnapshotClassroom = records.map((record) => ({
+            ...record,
+            student: {
+                ...record.student,
+                classroom:
+                    record.classroom ??
+                    record.student.classroom ??
+                    { name: 'ไม่ทราบห้อง' },
+            },
+        }));
 
         // จัดกลุ่มแยกประเภท (ASSEMBLY / AREA) ส่งกลับไปให้หน้าบ้านใช้ง่ายๆ
         return {
@@ -108,8 +155,8 @@ export class AttendanceService {
             isSchoolDay: true,
             reason: null,
             records: {
-                ASSEMBLY: records.filter(r => r.type === AttendanceType.ASSEMBLY),
-                AREA: records.filter(r => r.type === AttendanceType.AREA),
+                ASSEMBLY: recordsWithSnapshotClassroom.filter(r => r.type === AttendanceType.ASSEMBLY),
+                AREA: recordsWithSnapshotClassroom.filter(r => r.type === AttendanceType.AREA),
             }
         };
     }
@@ -122,8 +169,8 @@ export class AttendanceService {
             ? dayjs.tz(dateStr, 'YYYY-MM-DD', 'Asia/Bangkok')
             : dayjs().tz('Asia/Bangkok');
 
-        const { schoolDayStatus } =
-            await this.getActiveTermSchoolDayStatus(targetDate);
+        const { term, schoolDayStatus } =
+            await this.getTermSchoolDayStatus(targetDate);
 
         if (!schoolDayStatus.isSchoolDay) {
             return {
@@ -146,13 +193,17 @@ export class AttendanceService {
             where: {
                 // กรองตาม ID (ถ้ามี)
                 id: classroomId ? Number(classroomId) : undefined,
-                // ✅ กรองเจาะจงไปที่ตาราง term ที่เชื่อมกันอยู่
-                term: {
-                    isActive: true
-                }
+                termId: term!.id,
             },
             include: {
-                _count: { select: { students: true } },
+                enrollments: {
+                    where: { termId: term!.id },
+                    select: { studentId: true },
+                },
+                students: {
+                    where: { role: 'STUDENT' },
+                    select: { id: true },
+                },
             },
             orderBy: { name: 'asc' },
         });
@@ -161,20 +212,29 @@ export class AttendanceService {
         const attendances = await this.prisma.attendanceRecord.findMany({
             where: {
                 date: { gte: startOfDay, lte: endOfDay },
+                termId: term!.id,
                 type: targetType,
-                student: {
-                    classroomId: classroomId ? Number(classroomId) : undefined,
-                },
+                classroomId: classroomId ? Number(classroomId) : undefined,
             },
-            include: {
+            select: {
+                classroomId: true,
+                status: true,
                 student: { select: { classroomId: true } },
             },
         });
 
         // คำนวณสรุปผล
         const summary = classrooms.map((room) => {
-            const roomAttendances = attendances.filter((a) => a.student.classroomId === room.id);
-            const totalStudents = room._count.students;
+            const roomAttendances = attendances.filter(
+                (attendance) =>
+                    (attendance.classroomId ?? attendance.student.classroomId) ===
+                    room.id,
+            );
+            const rosterIds =
+                room.enrollments.length > 0
+                    ? room.enrollments.map((enrollment) => enrollment.studentId)
+                    : room.students.map((student) => student.id);
+            const totalStudents = new Set(rosterIds).size;
 
             const presentCount = roomAttendances.filter((a) => a.status === AttendanceStatus.PRESENT).length;
             const absentCount = roomAttendances.filter((a) => a.status === AttendanceStatus.ABSENT).length;
@@ -182,7 +242,7 @@ export class AttendanceService {
             const leaveCount = roomAttendances.filter((a) => a.status === AttendanceStatus.LEAVE).length;
 
             const totalChecked = presentCount + absentCount + lateCount + leaveCount;
-            const notCheckedCount = totalStudents - totalChecked;
+            const notCheckedCount = Math.max(0, totalStudents - totalChecked);
 
             const calcPercent = (count: number) => {
                 if (totalStudents === 0) return 0;
@@ -252,6 +312,11 @@ export class AttendanceService {
         if (newRecords.length === 0) {
             throw new BadRequestException(`นักเรียนทั้งหมดในรายการนี้ ถูกเช็คชื่อประเภท ${dto.type} ของวันนี้ไปแล้ว`);
         }
+        const studentContexts = await requireStudentAcademicContexts(
+            this.prisma,
+            newRecords.map((record) => record.studentId),
+            activeTerm.id,
+        );
 
         // ดึงข้อมูลนักเรียนชุดนี้มาล่วงหน้าเพื่อเอา lineUserId และชื่อไปส่ง LINE
         const studentsToNotify = await this.prisma.user.findMany({
@@ -266,20 +331,25 @@ export class AttendanceService {
 
         return this.prisma.$transaction(async (tx) => {
             // 3. บันทึกการเช็คชื่อ (เฉพาะคนที่ผ่านการกรองแล้ว)
-            const attendanceData = newRecords.map((r) => ({
-                type: dto.type,
-                status: r.status,
-                studentId: r.studentId,
-                recorderId: recorderId,
-                termId: activeTerm.id,
-            }));
+            const attendanceData = newRecords.map((r) => {
+                const context = studentContexts.get(r.studentId)!;
+                return {
+                    type: dto.type,
+                    status: r.status,
+                    studentId: r.studentId,
+                    recorderId: recorderId,
+                    termId: activeTerm.id,
+                    classroomId: context.classroomId,
+                };
+            });
             const createdAttendances = await tx.attendanceRecord.createMany({ data: attendanceData });
 
             // 4. หักคะแนน
             const behaviorData: any[] = [];
-            const notePrefix = `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${dto.type === AttendanceType.ASSEMBLY ? 'เข้าแถว' : 'เขตพื้นที่'}`;
+            const notePrefix = this.attendanceBehaviorNote(dto.type);
 
             for (const record of newRecords) {
+                const context = studentContexts.get(record.studentId)!;
                 if (record.status === AttendanceStatus.LATE && lateCategory) {
                     behaviorData.push({
                         points: lateCategory.defaultPoints,
@@ -287,6 +357,12 @@ export class AttendanceService {
                         studentId: record.studentId,
                         recorderId: recorderId,
                         note: notePrefix,
+                        pointDelta: calculateLegacyPointDelta({
+                            points: lateCategory.defaultPoints,
+                            category: lateCategory,
+                        }),
+                        classroomId: context.classroomId,
+                        termId: activeTerm.id,
                     });
                 } else if (record.status === AttendanceStatus.ABSENT && absentCategory) {
                     behaviorData.push({
@@ -295,6 +371,12 @@ export class AttendanceService {
                         studentId: record.studentId,
                         recorderId: recorderId,
                         note: notePrefix,
+                        pointDelta: calculateLegacyPointDelta({
+                            points: absentCategory.defaultPoints,
+                            category: absentCategory,
+                        }),
+                        classroomId: context.classroomId,
+                        termId: activeTerm.id,
                     });
                 }
             }
@@ -329,6 +411,15 @@ export class AttendanceService {
         const existingRecord = await this.prisma.attendanceRecord.findUnique({ where: { id } });
         if (!existingRecord) throw new NotFoundException('ไม่พบข้อมูล');
         if (existingRecord.status === dto.status) return existingRecord;
+        const context = existingRecord.classroomId
+            ? null
+            : await requireStudentAcademicContext(
+                this.prisma,
+                existingRecord.studentId,
+                existingRecord.termId,
+            );
+        const classroomId =
+            existingRecord.classroomId ?? context!.classroomId;
 
         const [lateCategory, absentCategory] = await Promise.all([
             this.prisma.pointCategory.findUnique({ where: { id: this.LATE_CATEGORY_ID } }),
@@ -341,13 +432,14 @@ export class AttendanceService {
             const startOfDay = recordDate.startOf('day').toDate();
             const endOfDay = recordDate.endOf('day').toDate();
 
-            const noteRef = `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${existingRecord.type}`;
+            const noteRef = this.attendanceBehaviorNote(existingRecord.type);
+            const legacyNoteRef = `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${existingRecord.type}`;
 
             if (existingRecord.status === AttendanceStatus.LATE || existingRecord.status === AttendanceStatus.ABSENT) {
                 await tx.behaviorRecord.deleteMany({
                     where: {
                         studentId: existingRecord.studentId,
-                        note: noteRef,
+                        note: { in: [noteRef, legacyNoteRef] },
                         createdAt: { gte: startOfDay, lte: endOfDay },
                     },
                 });
@@ -361,6 +453,12 @@ export class AttendanceService {
                         studentId: existingRecord.studentId,
                         recorderId: updaterId,
                         note: noteRef,
+                        pointDelta: calculateLegacyPointDelta({
+                            points: lateCategory.defaultPoints,
+                            category: lateCategory,
+                        }),
+                        classroomId,
+                        termId: existingRecord.termId,
                     },
                 });
             } else if (dto.status === AttendanceStatus.ABSENT && absentCategory) {
@@ -371,13 +469,23 @@ export class AttendanceService {
                         studentId: existingRecord.studentId,
                         recorderId: updaterId,
                         note: noteRef,
+                        pointDelta: calculateLegacyPointDelta({
+                            points: absentCategory.defaultPoints,
+                            category: absentCategory,
+                        }),
+                        classroomId,
+                        termId: existingRecord.termId,
                     },
                 });
             }
 
             return tx.attendanceRecord.update({
                 where: { id },
-                data: { status: dto.status, recorderId: updaterId },
+                data: {
+                    status: dto.status,
+                    recorderId: updaterId,
+                    classroomId,
+                },
             });
         });
     }
@@ -387,7 +495,11 @@ export class AttendanceService {
         const records = await this.prisma.attendanceRecord.findMany({
             where: { studentId },
             orderBy: { date: 'desc' },
-            include: { recorder: { select: { firstName: true, lastName: true } } },
+            include: {
+                classroom: { select: { id: true, name: true } },
+                term: { select: { id: true, term: true, year: true } },
+                recorder: { select: { firstName: true, lastName: true } },
+            },
         });
 
         // แนบ field 'localDate' ที่เป็นเวลาไทยไปให้หน้าบ้านใช้ง่ายๆ ครับ
@@ -402,8 +514,8 @@ export class AttendanceService {
     async getMissingAttendanceClassrooms(dateString?: string) {
         // 1. ตั้งค่าวันที่ต้องการค้นหา (ถ้าไม่ระบุ จะดึงของ "วันนี้" โซนเวลาไทย)
         const targetDate = dateString ? dayjs(dateString).tz(this.TIMEZONE) : dayjs().tz(this.TIMEZONE);
-        const { schoolDayStatus } =
-            await this.getActiveTermSchoolDayStatus(targetDate);
+        const { term, schoolDayStatus } =
+            await this.getTermSchoolDayStatus(targetDate);
 
         if (!schoolDayStatus.isSchoolDay) {
             return {
@@ -424,11 +536,13 @@ export class AttendanceService {
 
         // 2. ดึงข้อมูลห้องเรียนทั้งหมด พร้อมดึงเฉพาะ ID ของนักเรียนและชื่อครูที่ปรึกษา
         const classrooms = await this.prisma.classroom.findMany({
-            where: {
-                term: { isActive: true } // แนะนำให้กรองเฉพาะเทอมปัจจุบันด้วยครับ
-            },
+            where: { termId: term!.id },
             include: {
                 advisors: { select: { firstName: true, lastName: true, lineUserId: true } },
+                enrollments: {
+                    where: { termId: term!.id },
+                    select: { studentId: true },
+                },
                 students: {
                     where: { role: 'STUDENT' },
                     select: { id: true }, // ดึงแค่ ID มาก็พอเพื่อความรวดเร็ว
@@ -441,6 +555,7 @@ export class AttendanceService {
         const todayRecords = await this.prisma.attendanceRecord.findMany({
             where: {
                 date: { gte: startOfDay, lte: endOfDay },
+                termId: term!.id,
             },
             select: { studentId: true, type: true },
         });
@@ -455,7 +570,10 @@ export class AttendanceService {
 
         // 5. นำห้องเรียนมาเทียบกับข้อมูลการเช็คชื่อ
         const allDetails = classrooms.map(room => {
-            const studentIds = room.students.map(s => s.id);
+            const studentIds =
+                room.enrollments.length > 0
+                    ? room.enrollments.map(enrollment => enrollment.studentId)
+                    : room.students.map(student => student.id);
             const studentCount = studentIds.length;
             const advisorName = room.advisors.length > 0
                 ? room.advisors.map(advisor => advisor.firstName).join(', ')
@@ -519,8 +637,8 @@ export class AttendanceService {
     async sendLineNotification(dateStr?: string) {
         // 1. กำหนดวันที่เป้าหมาย (ถ้าไม่ส่งมา ให้ใช้วันปัจจุบัน)
         const targetDate = dateStr ? dayjs.tz(dateStr, 'Asia/Bangkok') : dayjs.tz('Asia/Bangkok');
-        const { schoolDayStatus } =
-            await this.getActiveTermSchoolDayStatus(targetDate);
+        const { term, schoolDayStatus } =
+            await this.getTermSchoolDayStatus(targetDate);
 
         if (!schoolDayStatus.isSchoolDay) {
             return {
@@ -538,9 +656,7 @@ export class AttendanceService {
 
         // 2. ดึงห้องเรียนทั้งหมดที่อยู่ในเทอมปัจจุบัน พร้อมดึงข้อมูลครูที่ปรึกษาที่มี LINE ID
         const classrooms = await this.prisma.classroom.findMany({
-            where: {
-                term: { isActive: true }, // เอาเฉพาะเทอมที่เปิดใช้งาน
-            },
+            where: { termId: term!.id },
             include: {
                 advisors: {
                     where: {
@@ -569,7 +685,8 @@ export class AttendanceService {
                 where: {
                     type: 'ASSEMBLY',
                     date: { gte: startOfDay, lte: endOfDay },
-                    student: { classroomId: room.id },
+                    termId: term!.id,
+                    classroomId: room.id,
                 },
             });
 
@@ -578,7 +695,8 @@ export class AttendanceService {
                 where: {
                     type: 'AREA',
                     date: { gte: startOfDay, lte: endOfDay },
-                    student: { classroomId: room.id },
+                    termId: term!.id,
+                    classroomId: room.id,
                 },
             });
 

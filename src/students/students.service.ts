@@ -11,6 +11,10 @@ import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as XLSX from 'xlsx';
 import 'multer';
+import {
+  enrollmentDataForContext,
+  requireClassroomAcademicContext,
+} from './student-academic-context';
 
 @Injectable()
 export class StudentsService {
@@ -25,6 +29,10 @@ export class StudentsService {
 
     // 2. Hash Password
     const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const classroomContext = await requireClassroomAcademicContext(
+      this.prisma,
+      dto.classroomId,
+    );
 
     // 3. สร้าง User โดยระบุ Role เป็น STUDENT
     return this.prisma.user.create({
@@ -32,6 +40,12 @@ export class StudentsService {
         ...dto,
         password: hashedPassword,
         role: Role.STUDENT,
+        pointAccount: {
+          create: { initialPoints: classroomContext.startingPoints },
+        },
+        enrollments: {
+          create: enrollmentDataForContext(classroomContext, new Date()),
+        },
       },
       select: {
         id: true,
@@ -91,10 +105,7 @@ export class StudentsService {
           },
         },
       },
-      orderBy: [
-        { firstName: 'asc' },
-        { lastName: 'asc' },
-      ],
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });
   }
 
@@ -108,16 +119,55 @@ export class StudentsService {
   }
 
   async update(id: string, dto: UpdateStudentDto) {
-    await this.findOne(id);
+    const existingStudent = await this.findOne(id);
 
     const data = { ...dto };
     if (dto.password) {
       data.password = await bcrypt.hash(dto.password, 10);
     }
 
-    return this.prisma.user.update({
-      where: { id },
-      data,
+    const isMovingClassroom =
+      dto.classroomId !== undefined &&
+      dto.classroomId !== existingStudent.classroomId;
+    if (!isMovingClassroom) {
+      return this.prisma.user.update({
+        where: { id },
+        data,
+      });
+    }
+
+    const targetContext = await requireClassroomAcademicContext(
+      this.prisma,
+      dto.classroomId as number,
+    );
+    const initialPoints =
+      existingStudent.classroom?.startingPoints ?? targetContext.startingPoints;
+    const movedAt = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.studentPointAccount.upsert({
+        where: { studentId: id },
+        create: { studentId: id, initialPoints },
+        update: {},
+      });
+      await tx.studentEnrollment.updateMany({
+        where: { studentId: id, status: 'ACTIVE' },
+        data: {
+          status: 'ENDED',
+          exitReason: 'TRANSFERRED',
+          endedAt: movedAt,
+        },
+      });
+      await tx.studentEnrollment.create({
+        data: {
+          studentId: id,
+          ...enrollmentDataForContext(targetContext, movedAt),
+        },
+      });
+      return tx.user.update({
+        where: { id },
+        data,
+      });
     });
   }
 
@@ -162,7 +212,7 @@ export class StudentsService {
     // 3. ตรวจสอบข้อมูลจำเป็น และเก็บตำแหน่ง citizenId เพื่อเช็คข้อมูลซ้ำในไฟล์
     for (const row of normalizedRows) {
       const missingFields: string[] = [];
-  
+
       if (!row.citizenId) missingFields.push('citizenId');
       if (!row.firstName) missingFields.push('firstName');
       if (!row.lastName) missingFields.push('lastName');
@@ -231,6 +281,10 @@ export class StudentsService {
       try {
         // เข้ารหัสผ่าน (ถ้าไม่มีในไฟล์ ให้ใช้เลขท้ายบัตรประชาชนหรือค่า Default)
         const hashedPassword = await bcrypt.hash(row.password, 10);
+        const classroomContext = await requireClassroomAcademicContext(
+          this.prisma,
+          row.classroomId,
+        );
 
         await this.prisma.user.create({
           data: {
@@ -240,6 +294,12 @@ export class StudentsService {
             password: hashedPassword,
             role: Role.STUDENT,
             classroomId: row.classroomId,
+            pointAccount: {
+              create: { initialPoints: classroomContext.startingPoints },
+            },
+            enrollments: {
+              create: enrollmentDataForContext(classroomContext, new Date()),
+            },
           },
         });
         results.success++;

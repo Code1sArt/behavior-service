@@ -41,14 +41,24 @@ case "${DEPLOY_DATABASE_MODE:-migrate}" in
       echo "Set DEPLOY_DATABASE_MODE=push on the Plesk app env if this project intentionally uses prisma db push."
     fi
     ;;
-  push)
-    yarn prisma db push
-    ;;
   skip)
     echo "Skipping database update."
     ;;
   *)
-    echo "Unsupported DEPLOY_DATABASE_MODE=${DEPLOY_DATABASE_MODE}. Use migrate, push, or skip." >&2
+    echo "Unsupported DEPLOY_DATABASE_MODE=${DEPLOY_DATABASE_MODE}. Use migrate or skip." >&2
+    exit 1
+    ;;
+esac
+
+case "${DEPLOY_APP_MODE:-release}" in
+  prepare)
+    echo "Prepare mode completed. The running application was not rebuilt or restarted."
+    exit 0
+    ;;
+  release)
+    ;;
+  *)
+    echo "Unsupported DEPLOY_APP_MODE=${DEPLOY_APP_MODE}. Use prepare or release." >&2
     exit 1
     ;;
 esac

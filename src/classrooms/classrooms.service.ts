@@ -89,25 +89,58 @@ export class ClassroomsService {
     }
 
     async update(id: number, dto: UpdateClassroomDto) { // ใช้ UpdateClassroomDto ของคุณ
+        const existingRoom = await this.prisma.classroom.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: {
+                        students: true,
+                        enrollments: true,
+                        attendanceRecords: true,
+                        behaviorRecords: true,
+                    },
+                },
+            },
+        });
+        if (!existingRoom) {
+            throw new NotFoundException(`ไม่พบข้อมูลห้องเรียน ID: ${id}`);
+        }
+
+        const hasHistoricalRecords =
+            existingRoom._count.enrollments > 0 ||
+            existingRoom._count.attendanceRecords > 0 ||
+            existingRoom._count.behaviorRecords > 0;
+        const isChangingName =
+            dto.name !== undefined && dto.name !== existingRoom.name;
+        const isChangingTerm =
+            dto.termId !== undefined && dto.termId !== existingRoom.termId;
+
+        if (hasHistoricalRecords && (isChangingName || isChangingTerm)) {
+            throw new BadRequestException(
+                'ไม่สามารถเปลี่ยนชื่อหรือภาคเรียนของห้องที่มีประวัติแล้ว กรุณาสร้างห้องใหม่สำหรับภาคเรียนใหม่',
+            );
+        }
+        if (existingRoom._count.students > 0 && isChangingTerm) {
+            throw new BadRequestException(
+                'ไม่สามารถย้ายภาคเรียนของห้องที่มีนักเรียนอยู่ กรุณาใช้ระบบเปลี่ยนภาคเรียน',
+            );
+        }
 
         // 1. ตรวจสอบก่อนว่ามีการเปลี่ยนชื่อห้องหรือเทอมไหม (ป้องกันชื่อซ้ำ)
         if (dto.name || dto.termId) {
-            const existingRoom = await this.prisma.classroom.findUnique({ where: { id } });
-            if (existingRoom) {
-                const checkName = dto.name || existingRoom.name;
-                const checkTerm = dto.termId || existingRoom.termId;
+            const checkName = dto.name || existingRoom.name;
+            const checkTerm = dto.termId || existingRoom.termId;
 
-                const duplicate = await this.prisma.classroom.findFirst({
-                    where: {
-                        name: checkName,
-                        termId: checkTerm,
-                        id: { not: id } // หาห้องอื่นที่ชื่อซ้ำ แต่ไม่ใช่ห้องตัวมันเอง
-                    }
-                });
-
-                if (duplicate) {
-                    throw new ConflictException(`มีห้องเรียนชื่อ "${checkName}" ในภาคเรียนนี้อยู่แล้ว`);
+            const duplicate = await this.prisma.classroom.findFirst({
+                where: {
+                    name: checkName,
+                    termId: checkTerm,
+                    id: { not: id } // หาห้องอื่นที่ชื่อซ้ำ แต่ไม่ใช่ห้องตัวมันเอง
                 }
+            });
+
+            if (duplicate) {
+                throw new ConflictException(`มีห้องเรียนชื่อ "${checkName}" ในภาคเรียนนี้อยู่แล้ว`);
             }
         }
 
