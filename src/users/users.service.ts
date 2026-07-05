@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import * as bcrypt from 'bcrypt'; // อย่าลืม import bcrypt มาใช้เข้ารหัสผ่าน
 import { Prisma, Role } from '@prisma/client';
 
@@ -107,6 +108,31 @@ export class UsersService {
         // ลบรหัสผ่านออกก่อนส่งกลับไปที่หน้าบ้าน
         const { password, ...result } = user;
         return result;
+    }
+
+    async changePassword(userId: string, dto: ChangePasswordDto) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+        if (!user) {
+            throw new NotFoundException('ไม่พบข้อมูลผู้ใช้งาน');
+        }
+
+        const isCurrentPasswordValid = await bcrypt.compare(dto.oldPassword, user.password);
+        if (!isCurrentPasswordValid) {
+            throw new UnauthorizedException('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+        }
+
+        if (dto.oldPassword === dto.newPassword) {
+            throw new BadRequestException('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน');
+        }
+
+        const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { password: hashedPassword },
+        });
+
+        return { message: 'เปลี่ยนรหัสผ่านสำเร็จ' };
     }
 
     async removeUser(targetId: string, reqUser: any) {

@@ -1,7 +1,8 @@
-import { Controller, Patch, Get, Param, Body, UseGuards, Request, Delete } from '@nestjs/common';
+import { Controller, Patch, Put, Get, Param, Body, UseGuards, Request, Delete } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport'; // นำเข้า Guard สำหรับเช็ค JWT
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -32,6 +33,15 @@ export class UsersController {
     async getMe(@Request() req: any) {
         // req.user.userId ได้มาจาก Payload ของ JWT ตอนที่ Login สำเร็จครับ
         return this.usersService.getMe(req.user.userId);
+    }
+
+    @Put('me/password')
+    @ApiOperation({ summary: 'เปลี่ยนรหัสผ่านของตัวเอง' })
+    changePassword(
+        @Request() req: any,
+        @Body() changePasswordDto: ChangePasswordDto,
+    ) {
+        return this.usersService.changePassword(req.user.userId, changePasswordDto);
     }
 
     @Delete(':id')
