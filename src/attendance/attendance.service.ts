@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBulkAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
 import { AttendanceStatus, AttendanceType } from '@prisma/client';
@@ -410,6 +410,9 @@ export class AttendanceService {
     async updateAttendance(id: string, updaterId: string, dto: UpdateAttendanceDto) {
         const existingRecord = await this.prisma.attendanceRecord.findUnique({ where: { id } });
         if (!existingRecord) throw new NotFoundException('ไม่พบข้อมูล');
+        if (existingRecord.recorderId !== updaterId) {
+            throw new ForbiddenException('แก้ไขได้เฉพาะครูผู้เช็คชื่อรายการนี้เท่านั้น');
+        }
         if (existingRecord.status === dto.status) return existingRecord;
         const context = existingRecord.classroomId
             ? null

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AttendanceStatus, AttendanceType, PointType } from '@prisma/client';
 import { AcademicCalendarService } from '../academic-calendar/academic-calendar.service';
 import { LineService } from '../line/line.service';
@@ -10,6 +10,7 @@ describe('AttendanceService', () => {
   const getSchoolDayStatus = jest.fn();
   const findClassrooms = jest.fn();
   const findAttendanceRecords = jest.fn();
+  const findAttendanceRecord = jest.fn();
   const findStudents = jest.fn();
   const findPointCategory = jest.fn();
   const createAttendances = jest.fn();
@@ -23,7 +24,10 @@ describe('AttendanceService', () => {
   const prisma = {
     academicTerm: { findFirst: findActiveTerm },
     classroom: { findMany: findClassrooms },
-    attendanceRecord: { findMany: findAttendanceRecords },
+    attendanceRecord: {
+      findMany: findAttendanceRecords,
+      findUnique: findAttendanceRecord,
+    },
     behaviorRecord: { createMany: createBehaviors },
     user: { findMany: findStudents },
     pointCategory: { findUnique: findPointCategory },
@@ -48,6 +52,7 @@ describe('AttendanceService', () => {
     getSchoolDayStatus.mockReset();
     findClassrooms.mockReset();
     findAttendanceRecords.mockReset();
+    findAttendanceRecord.mockReset();
     findStudents.mockReset();
     findPointCategory.mockReset();
     createAttendances.mockReset();
@@ -75,6 +80,22 @@ describe('AttendanceService', () => {
       'ไม่สามารถเช็คชื่อได้ เนื่องจากวันนี้ไม่ใช่วันเรียน (WEEKEND)',
     );
     expect(getSchoolDayStatus).toHaveBeenCalledWith(1, expect.anything());
+  });
+
+  it('allows only the original recorder to edit attendance', async () => {
+    findAttendanceRecord.mockResolvedValue({
+      id: 'attendance-1',
+      recorderId: 'recorder-1',
+      status: AttendanceStatus.PRESENT,
+    });
+
+    await expect(
+      service.updateAttendance('attendance-1', 'recorder-2', {
+        status: AttendanceStatus.LATE,
+      }),
+    ).rejects.toThrow(
+      new ForbiddenException('แก้ไขได้เฉพาะครูผู้เช็คชื่อรายการนี้เท่านั้น'),
+    );
   });
 
   it('writes classroom, term, and signed behavior points', async () => {
