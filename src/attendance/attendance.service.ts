@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBulkAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
-import { AttendanceStatus, AttendanceType } from '@prisma/client';
+import { AttendanceStatus, AttendanceType, Role } from '@prisma/client';
 import { LineService } from '../line/line.service'; // <--- 1. นำเข้า 
 import { AcademicCalendarService } from '../academic-calendar/academic-calendar.service';
 
@@ -493,7 +493,41 @@ export class AttendanceService {
         });
     }
 
-    async getStudentAttendance(studentId: string) {
+    async getStudentAttendance(studentId: string, requesterId: string, requesterRole: Role) {
+        if (requesterRole === Role.STUDENT && requesterId !== studentId) {
+            throw new ForbiddenException('นักเรียนดูประวัติการเช็คชื่อได้เฉพาะของตนเอง');
+        }
+
+        if (requesterRole === Role.TEACHER) {
+            const advisedStudent = await this.prisma.user.findFirst({
+                where: {
+                    id: studentId,
+                    role: Role.STUDENT,
+                    classroom: {
+                        advisors: { some: { id: requesterId } },
+                    },
+                },
+                select: { id: true },
+            });
+            if (!advisedStudent) {
+                throw new ForbiddenException('ครูดูประวัติได้เฉพาะนักเรียนในห้องที่ปรึกษา');
+            }
+        }
+
+        if (requesterRole === Role.PARENT) {
+            const child = await this.prisma.user.findFirst({
+                where: {
+                    id: studentId,
+                    role: Role.STUDENT,
+                    parentId: requesterId,
+                },
+                select: { id: true },
+            });
+            if (!child) {
+                throw new ForbiddenException('ผู้ปกครองดูประวัติได้เฉพาะนักเรียนในความดูแล');
+            }
+        }
+
         // เวลาดึงข้อมูลส่งกลับให้หน้าบ้าน เราสามารถแปลงเป็นเวลาไทยตรงนี้ได้
         const records = await this.prisma.attendanceRecord.findMany({
             where: { studentId },

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { AttendanceStatus, AttendanceType, PointType } from '@prisma/client';
+import { AttendanceStatus, AttendanceType, PointType, Role } from '@prisma/client';
 import { AcademicCalendarService } from '../academic-calendar/academic-calendar.service';
 import { LineService } from '../line/line.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -96,6 +96,19 @@ describe('AttendanceService', () => {
     ).rejects.toThrow(
       new ForbiddenException('แก้ไขได้เฉพาะครูผู้เช็คชื่อรายการนี้เท่านั้น'),
     );
+  });
+
+  it('prevents a student from reading another student attendance history', async () => {
+    await expect(
+      service.getStudentAttendance(
+        'student-2',
+        'student-1',
+        Role.STUDENT,
+      ),
+    ).rejects.toThrow(
+      new ForbiddenException('นักเรียนดูประวัติการเช็คชื่อได้เฉพาะของตนเอง'),
+    );
+    expect(findAttendanceRecords).not.toHaveBeenCalled();
   });
 
   it('writes classroom, term, and signed behavior points', async () => {

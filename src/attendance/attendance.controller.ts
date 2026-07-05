@@ -31,8 +31,12 @@ export class AttendanceController {
     @Get('student/:studentId')
     @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS, Role.PARENT, Role.STUDENT)
     @ApiOperation({ summary: 'ดูประวัติการเช็คชื่อของนักเรียน' })
-    getStudentAttendance(@Param('studentId') studentId: string) {
-        return this.attendanceService.getStudentAttendance(studentId);
+    getStudentAttendance(@Param('studentId') studentId: string, @Request() req: any) {
+        return this.attendanceService.getStudentAttendance(
+            studentId,
+            req.user.userId,
+            req.user.role,
+        );
     }
 
     @Get('missing-report')
