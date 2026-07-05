@@ -68,11 +68,7 @@ export class StudentsService {
   }
 
   async search(query: string, limit = 30) {
-    const normalizedQuery = query?.trim();
-
-    if (!normalizedQuery) {
-      throw new BadRequestException('กรุณาระบุคำค้นหา');
-    }
+    const normalizedQuery = query?.trim() ?? '';
 
     if (limit < 1 || limit > 100) {
       throw new BadRequestException('limit ต้องอยู่ระหว่าง 1 ถึง 100');
@@ -83,13 +79,15 @@ export class StudentsService {
     return this.prisma.user.findMany({
       where: {
         role: Role.STUDENT,
-        AND: searchTerms.map((term) => ({
-          OR: [
-            { citizenId: { contains: term } },
-            { firstName: { contains: term } },
-            { lastName: { contains: term } },
-          ],
-        })),
+        ...(normalizedQuery && {
+          AND: searchTerms.map((term) => ({
+            OR: [
+              { citizenId: { contains: term } },
+              { firstName: { contains: term } },
+              { lastName: { contains: term } },
+            ],
+          })),
+        }),
       },
       take: limit,
       select: {

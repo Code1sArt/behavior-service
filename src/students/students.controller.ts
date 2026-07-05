@@ -33,10 +33,10 @@ export class StudentsController {
 
     @Get('search')
     @ApiOperation({ summary: 'ค้นหานักเรียนด้วยรหัสนักเรียน ชื่อ หรือนามสกุล' })
-    @ApiQuery({ name: 'q', required: true, example: 'สมชาย' })
+    @ApiQuery({ name: 'q', required: false, example: 'สมชาย', description: 'เว้นว่างเพื่อดู 30 คนแรก' })
     @ApiQuery({ name: 'limit', required: false, example: 30, description: 'จำนวนผลลัพธ์ 1-100 รายการ' })
     search(
-        @Query('q') q: string,
+        @Query('q', new DefaultValuePipe('')) q: string,
         @Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit: number,
     ) {
         return this.studentsService.search(q, limit);

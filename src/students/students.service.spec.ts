@@ -58,4 +58,20 @@ describe('StudentsService history writes', () => {
       },
     });
   });
+
+  it('returns the first 30 students when the search query is empty', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new StudentsService({
+      user: { findMany },
+    } as never);
+
+    await service.search('', 30);
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { role: 'STUDENT' },
+        take: 30,
+      }),
+    );
+  });
 });
