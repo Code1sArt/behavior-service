@@ -170,8 +170,48 @@ export class StudentsService {
   }
 
   async remove(id: string) {
-    await this.findOne(id);
-    return this.prisma.user.delete({ where: { id } });
+    const student = await this.findOne(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      // Foreign keys ของตารางประวัติใช้ Restrict จึงต้องลบข้อมูลลูกก่อนลบบัญชี
+      const attendance = await tx.attendanceRecord.deleteMany({
+        where: {
+          OR: [{ studentId: id }, { recorderId: id }],
+        },
+      });
+      const behaviors = await tx.behaviorRecord.deleteMany({
+        where: {
+          OR: [{ studentId: id }, { recorderId: id }],
+        },
+      });
+      const promotionItems = await tx.promotionItem.deleteMany({
+        where: { studentId: id },
+      });
+      const enrollments = await tx.studentEnrollment.deleteMany({
+        where: { studentId: id },
+      });
+      const pointAccounts = await tx.studentPointAccount.deleteMany({
+        where: { studentId: id },
+      });
+
+      await tx.user.delete({ where: { id } });
+
+      return {
+        success: true,
+        message: 'ลบนักเรียนและข้อมูลที่เกี่ยวข้องเรียบร้อยแล้ว',
+        student: {
+          id,
+          name: `${student.firstName} ${student.lastName}`.trim(),
+        },
+        deleted: {
+          attendanceRecords: attendance.count,
+          behaviorRecords: behaviors.count,
+          promotionItems: promotionItems.count,
+          enrollments: enrollments.count,
+          pointAccounts: pointAccounts.count,
+        },
+      };
+    });
   }
 
   async importStudents(file: Express.Multer.File) {

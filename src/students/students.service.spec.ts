@@ -74,4 +74,70 @@ describe('StudentsService history writes', () => {
       }),
     );
   });
+
+  it('deletes all student-owned records in a transaction before deleting the user', async () => {
+    const attendanceDeleteMany = jest.fn().mockResolvedValue({ count: 3 });
+    const behaviorDeleteMany = jest.fn().mockResolvedValue({ count: 2 });
+    const promotionDeleteMany = jest.fn().mockResolvedValue({ count: 1 });
+    const enrollmentDeleteMany = jest.fn().mockResolvedValue({ count: 2 });
+    const pointAccountDeleteMany = jest.fn().mockResolvedValue({ count: 1 });
+    const userDelete = jest.fn().mockResolvedValue({ id: 'student-1' });
+    const transactionClient = {
+      attendanceRecord: { deleteMany: attendanceDeleteMany },
+      behaviorRecord: { deleteMany: behaviorDeleteMany },
+      promotionItem: { deleteMany: promotionDeleteMany },
+      studentEnrollment: { deleteMany: enrollmentDeleteMany },
+      studentPointAccount: { deleteMany: pointAccountDeleteMany },
+      user: { delete: userDelete },
+    };
+    const service = new StudentsService({
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'student-1',
+          role: 'STUDENT',
+          firstName: 'สมชาย',
+          lastName: 'ใจดี',
+        }),
+      },
+      $transaction: jest.fn(
+        (callback: (tx: typeof transactionClient) => Promise<unknown>) =>
+          callback(transactionClient),
+      ),
+    } as never);
+
+    const result = await service.remove('student-1');
+
+    expect(attendanceDeleteMany).toHaveBeenCalledWith({
+      where: {
+        OR: [{ studentId: 'student-1' }, { recorderId: 'student-1' }],
+      },
+    });
+    expect(behaviorDeleteMany).toHaveBeenCalledWith({
+      where: {
+        OR: [{ studentId: 'student-1' }, { recorderId: 'student-1' }],
+      },
+    });
+    expect(promotionDeleteMany).toHaveBeenCalledWith({
+      where: { studentId: 'student-1' },
+    });
+    expect(enrollmentDeleteMany).toHaveBeenCalledWith({
+      where: { studentId: 'student-1' },
+    });
+    expect(pointAccountDeleteMany).toHaveBeenCalledWith({
+      where: { studentId: 'student-1' },
+    });
+    expect(userDelete).toHaveBeenCalledWith({
+      where: { id: 'student-1' },
+    });
+    expect(result).toMatchObject({
+      success: true,
+      deleted: {
+        attendanceRecords: 3,
+        behaviorRecords: 2,
+        promotionItems: 1,
+        enrollments: 2,
+        pointAccounts: 1,
+      },
+    });
+  });
 });

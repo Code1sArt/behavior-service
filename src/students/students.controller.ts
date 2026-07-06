@@ -50,8 +50,9 @@ export class StudentsController {
     }
 
     @Delete(':id')
+    @UseGuards(AuthGuard('jwt'), RolesGuard)
     @Roles(Role.ADMIN) // <--- เฉพาะ ADMIN เท่านั้นที่ลบได้ตามโจทย์ครับ
-    @ApiOperation({ summary: 'ลบข้อมูลนักเรียน (เฉพาะ Admin เท่านั้น)' })
+    @ApiOperation({ summary: 'ลบบัญชีนักเรียนและข้อมูลที่เกี่ยวข้องทั้งหมด (เฉพาะ Admin)' })
     remove(@Param('id') id: string) {
         return this.studentsService.remove(id);
     }
