@@ -46,6 +46,16 @@ export class UsersService {
                 'ไม่สามารถเปลี่ยนเข้า/ออกจากบทบาทนักเรียนผ่าน API ผู้ใช้งานทั่วไปได้',
             );
         }
+        if (
+            reqUser.role === Role.ADMIN &&
+            reqUser.userId === targetId &&
+            dto.role !== undefined &&
+            dto.role !== existingUser.role
+        ) {
+            throw new ForbiddenException(
+                'ไม่สามารถเปลี่ยนระดับสิทธิ์ของบัญชีที่กำลังใช้งานได้',
+            );
+        }
 
         // 4. เตรียมข้อมูลที่จะอัปเดต
         const updateData: any = { ...dto };

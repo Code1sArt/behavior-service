@@ -120,7 +120,7 @@ export class TeachersService {
             where: {
                 // กรองเอาเฉพาะ Role ที่เป็นบุคลากรโรงเรียน
                 role: {
-                    in: [Role.TEACHER, Role.AFFAIRS],
+                    in: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN],
                 },
             },
             // เลือกคืนค่าเฉพาะฟิลด์ที่จำเป็น (ไม่คืนค่า password!)
