@@ -20,8 +20,8 @@ dayjs.extend(timezone);
 
 @Injectable()
 export class AttendanceService {
-    private readonly LATE_CATEGORY_ID = 1;
-    private readonly ABSENT_CATEGORY_ID = 2;
+    private readonly LATE_CATEGORY_ID = 2;
+    private readonly ABSENT_CATEGORY_ID = 1;
     private readonly TIMEZONE = 'Asia/Bangkok'; // ตั้งค่าเป็นโซนเวลาไทย
     logger: any;
 
@@ -240,8 +240,9 @@ export class AttendanceService {
             const absentCount = roomAttendances.filter((a) => a.status === AttendanceStatus.ABSENT).length;
             const lateCount = roomAttendances.filter((a) => a.status === AttendanceStatus.LATE).length;
             const leaveCount = roomAttendances.filter((a) => a.status === AttendanceStatus.LEAVE).length;
+            const activityCount = roomAttendances.filter((a) => a.status === AttendanceStatus.ACTIVITY).length;
 
-            const totalChecked = presentCount + absentCount + lateCount + leaveCount;
+            const totalChecked = presentCount + absentCount + lateCount + leaveCount + activityCount;
             const notCheckedCount = Math.max(0, totalStudents - totalChecked);
 
             const calcPercent = (count: number) => {
@@ -260,12 +261,14 @@ export class AttendanceService {
                     absent: absentCount,
                     late: lateCount,
                     leave: leaveCount,
+                    activity: activityCount,
                 },
                 percentages: {
                     present: calcPercent(presentCount),
                     absent: calcPercent(absentCount),
                     late: calcPercent(lateCount),
                     leave: calcPercent(leaveCount),
+                    activity: calcPercent(activityCount),
                     notChecked: calcPercent(notCheckedCount),
                 },
             };

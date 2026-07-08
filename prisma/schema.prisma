@@ -24,6 +24,7 @@ enum AttendanceStatus {
   LATE // มาสาย (จะถูกใช้ใน Service เพื่อหัก 1 คะแนนอัตโนมัติ)
   ABSENT // ขาดเรียน (จะถูกใช้ใน Service เพื่อหัก 2 คะแนนอัตโนมัติ)
   LEAVE
+  ACTIVITY // เข้าร่วมกิจกรรม
 }
 
 enum PointType {
