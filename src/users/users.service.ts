@@ -93,6 +93,7 @@ export class UsersService {
                 children: {
                     select: {
                         id: true,
+                        citizenId: true,
                         firstName: true,
                         lastName: true,
                         classroom: {

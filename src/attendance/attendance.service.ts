@@ -37,6 +37,45 @@ export class AttendanceService {
         return `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${label}`;
     }
 
+    private attendanceTypeLabel(type: AttendanceType) {
+        return type === AttendanceType.ASSEMBLY ? 'เข้าแถว' : 'เขตพื้นที่';
+    }
+
+    private async notifyAttendanceStatus(
+        student: {
+            firstName: string;
+            lastName: string;
+            lineUserId: string | null;
+            parent?: { lineUserId: string | null } | null;
+        },
+        status: AttendanceStatus,
+        type: AttendanceType,
+        date: dayjs.Dayjs,
+    ) {
+        if (status !== AttendanceStatus.LATE && status !== AttendanceStatus.ABSENT) {
+            return;
+        }
+
+        const statusText = status === AttendanceStatus.LATE ? 'มาสาย' : 'ขาด';
+        const behaviorText = ' และถูกหักคะแนนพฤติกรรมอัตโนมัติ';
+        const message =
+            `🔔 [แจ้งเตือนการเช็คชื่อ]\n` +
+            `${student.firstName} ${student.lastName} มีสถานะ "${statusText}" ` +
+            `ในการเช็คชื่อประเภท${this.attendanceTypeLabel(type)} ` +
+            `ประจำวันที่ ${date.format('DD/MM/YYYY')}${behaviorText}ครับ`;
+
+        const targets = [
+            student.lineUserId,
+            student.parent?.lineUserId,
+        ].filter((lineUserId): lineUserId is string => Boolean(lineUserId));
+
+        await Promise.all(
+            [...new Set(targets)].map((lineUserId) =>
+                this.lineService.sendPushMessage(lineUserId, message),
+            ),
+        );
+    }
+
     private async getActiveTermSchoolDayStatus(targetDate: dayjs.Dayjs) {
         const activeTerm = await this.prisma.academicTerm.findFirst({
             where: { isActive: true },
@@ -324,7 +363,13 @@ export class AttendanceService {
         // ดึงข้อมูลนักเรียนชุดนี้มาล่วงหน้าเพื่อเอา lineUserId และชื่อไปส่ง LINE
         const studentsToNotify = await this.prisma.user.findMany({
             where: { id: { in: newRecords.map(r => r.studentId) } },
-            select: { id: true, firstName: true, lastName: true, lineUserId: true }
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                lineUserId: true,
+                parent: { select: { lineUserId: true } },
+            }
         });
 
         const [lateCategory, absentCategory] = await Promise.all([
@@ -392,14 +437,13 @@ export class AttendanceService {
             for (const record of newRecords) {
                 const student = studentsToNotify.find(s => s.id === record.studentId);
 
-                if (student && student.lineUserId) {
-                    if (record.status === AttendanceStatus.LATE) {
-                        const msg = `🔔 [แจ้งเตือน] ${student.firstName} ${student.lastName} มีสถานะ "มาสาย" ในการเช็คชื่อประเภท ${dto.type === AttendanceType.ASSEMBLY ? 'เข้าแถว' : 'เขตพื้นที่'} ประจำวันที่ ${todayThai.format('DD/MM/YYYY')} และถูกหักคะแนนพฤติกรรมอัตโนมัติครับ`;
-                        this.lineService.sendPushMessage(student.lineUserId, msg);
-                    } else if (record.status === AttendanceStatus.ABSENT) {
-                        const msg = `🔔 [แจ้งเตือน] ${student.firstName} ${student.lastName} มีสถานะ "ขาด" ในการเช็คชื่อประเภท ${dto.type === AttendanceType.ASSEMBLY ? 'เข้าแถว' : 'เขตพื้นที่'} ประจำวันที่ ${todayThai.format('DD/MM/YYYY')} ครับ`;
-                        this.lineService.sendPushMessage(student.lineUserId, msg);
-                    }
+                if (student) {
+                    void this.notifyAttendanceStatus(
+                        student,
+                        record.status,
+                        dto.type,
+                        todayThai,
+                    );
                 }
             }
 
@@ -432,7 +476,7 @@ export class AttendanceService {
             this.prisma.pointCategory.findUnique({ where: { id: this.ABSENT_CATEGORY_ID } }),
         ]);
 
-        return this.prisma.$transaction(async (tx) => {
+        const updatedRecord = await this.prisma.$transaction(async (tx) => {
             // ใช้ dayjs กำหนดขอบเขตของ "วันนั้น" ตามโซนเวลาไทย เพื่อลบคะแนนได้แม่นยำ
             const recordDate = dayjs(existingRecord.date).tz(this.TIMEZONE);
             const startOfDay = recordDate.startOf('day').toDate();
@@ -494,6 +538,27 @@ export class AttendanceService {
                 },
             });
         });
+
+        const student = await this.prisma.user.findUnique({
+            where: { id: existingRecord.studentId },
+            select: {
+                firstName: true,
+                lastName: true,
+                lineUserId: true,
+                parent: { select: { lineUserId: true } },
+            },
+        });
+
+        if (student) {
+            void this.notifyAttendanceStatus(
+                student,
+                dto.status,
+                existingRecord.type,
+                dayjs(existingRecord.date).tz(this.TIMEZONE),
+            );
+        }
+
+        return updatedRecord;
     }
 
     async getStudentAttendance(studentId: string, requesterId: string, requesterRole: Role) {

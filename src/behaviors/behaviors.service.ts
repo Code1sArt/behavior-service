@@ -18,6 +18,69 @@ export class BehaviorsService {
         private prisma: PrismaService,
         private lineService: LineService) { }
 
+    private behaviorActionText(type: PointType) {
+        return type === PointType.ADD ? 'ได้รับคะแนนเพิ่ม' : 'ถูกหักคะแนน';
+    }
+
+    private async notifyBehaviorRecorded(
+        student: {
+            firstName: string;
+            lastName: string;
+            lineUserId: string | null;
+            parent?: { lineUserId: string | null } | null;
+        },
+        category: { name: string; type: PointType; defaultPoints: number },
+        note: string | undefined,
+        recorderRole: Role,
+        classroomId: number,
+    ) {
+        const actionText = this.behaviorActionText(category.type);
+        const studentMessage =
+            `[แจ้งเตือนพฤติกรรม]\n` +
+            `${student.firstName} ${student.lastName} ${actionText} ${category.defaultPoints} คะแนน\n\n` +
+            `รายการ: ${category.name}` +
+            `${note ? `\nหมายเหตุ: ${note}` : ''}`;
+
+        const familyTargets = [
+            student.lineUserId,
+            student.parent?.lineUserId,
+        ].filter((lineUserId): lineUserId is string => Boolean(lineUserId));
+
+        const notifications = [...new Set(familyTargets)].map((lineUserId) =>
+            this.lineService.sendPushMessage(lineUserId, studentMessage),
+        );
+
+        if (
+            category.type === PointType.DEDUCT &&
+            (recorderRole === Role.ADMIN || recorderRole === Role.AFFAIRS)
+        ) {
+            const advisors = await this.prisma.user.findMany({
+                where: {
+                    role: Role.TEACHER,
+                    lineUserId: { not: null },
+                    advisingClasses: { some: { id: classroomId } },
+                },
+                select: { lineUserId: true },
+            });
+            const teacherMessage =
+                `[แจ้งเตือนคะแนนห้องที่ปรึกษา]\n` +
+                `${student.firstName} ${student.lastName} ถูกหักคะแนน ${category.defaultPoints} คะแนน\n\n` +
+                `รายการ: ${category.name}` +
+                `${note ? `\nหมายเหตุ: ${note}` : ''}`;
+
+            notifications.push(
+                ...advisors
+                    .map((advisor) => advisor.lineUserId)
+                    .filter((lineUserId): lineUserId is string => Boolean(lineUserId))
+                    .map((lineUserId) =>
+                        this.lineService.sendPushMessage(lineUserId, teacherMessage),
+                    ),
+            );
+        }
+
+        await Promise.all(notifications);
+    }
+
     async create(recorderId: string, recorderRole: Role, dto: CreateBehaviorDto) {
         // 1. ตรวจสอบว่ามีหมวดหมู่นี้อยู่จริงหรือไม่
         const category = await this.prisma.pointCategory.findUnique({
@@ -41,7 +104,7 @@ export class BehaviorsService {
         );
 
         // 3. บันทึกข้อมูล (ดึงคะแนนตั้งต้นจากหมวดหมู่มาล็อคไว้)
-        return this.prisma.behaviorRecord.create({
+        const record = await this.prisma.behaviorRecord.create({
             data: {
                 points: category.defaultPoints, // ล็อคค่าคะแนนตามหมวดหมู่ ณ เวลานั้น
                 note: dto.note,
@@ -59,6 +122,28 @@ export class BehaviorsService {
                 category: true, // ส่งข้อมูลหมวดหมู่กลับไปให้หน้าบ้านโชว์ด้วย
             }
         });
+
+        const student = await this.prisma.user.findUnique({
+            where: { id: dto.studentId },
+            select: {
+                firstName: true,
+                lastName: true,
+                lineUserId: true,
+                parent: { select: { lineUserId: true } },
+            },
+        });
+
+        if (student) {
+            void this.notifyBehaviorRecorded(
+                student,
+                category,
+                dto.note,
+                recorderRole,
+                context.classroomId,
+            );
+        }
+
+        return record;
     }
 
     // ดึงประวัติพฤติกรรมของนักเรียนรายบุคคล
@@ -120,18 +205,26 @@ export class BehaviorsService {
         // ดึงข้อมูลนักเรียนกลุ่มนี้มาเพื่อเอา lineUserId
         const studentsToNotify = await this.prisma.user.findMany({
             where: { id: { in: dto.studentIds } },
-            select: { id: true, firstName: true, lastName: true, lineUserId: true }
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                lineUserId: true,
+                parent: { select: { lineUserId: true } },
+            }
         });
 
         for (const student of studentsToNotify) {
-            if (student.lineUserId) {
-                // เช็คว่าเป็นหมวดหมู่เพิ่มคะแนน หรือหักคะแนน เพื่อใช้คำให้ถูกต้อง
-                const actionText = category.type === PointType.ADD ? 'ได้รับคะแนนบวก' : 'ถูกหักคะแนน';
-                const msg = `[แจ้งเตือนพฤติกรรม] ด.ช./ด.ญ. ${student.firstName} ${student.lastName} ${actionText} ${category.defaultPoints} คะแนน\n\nสาเหตุ: ${category.name}\n${dto.note ? 'หมายเหตุ: ' + dto.note : ''}`;
+            const context = contexts.get(student.id);
+            if (!context) continue;
 
-                // ส่ง LINE แบบ Fire-and-Forget
-                this.lineService.sendPushMessage(student.lineUserId, msg);
-            }
+            void this.notifyBehaviorRecorded(
+                student,
+                category,
+                dto.note,
+                recorderRole,
+                context.classroomId,
+            );
         }
 
         return {
