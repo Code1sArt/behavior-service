@@ -42,6 +42,7 @@ export class HolidaysController {
   }
 
   @Get()
+  @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS, Role.STUDENT, Role.PARENT)
   @ApiOperation({ summary: 'ดูวันหยุดทั้งหมดในภาคเรียน' })
   findAll(@Param('termId', ParseIntPipe) termId: number) {
     return this.holidaysService.findAll(termId);
@@ -76,6 +77,7 @@ export class TermCalendarController {
   constructor(private readonly holidaysService: HolidaysService) {}
 
   @Get()
+  @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS, Role.STUDENT, Role.PARENT)
   @ApiOperation({ summary: 'ดูปฏิทินวันเรียนของภาคเรียนรายเดือน' })
   @ApiQuery({
     name: 'month',
