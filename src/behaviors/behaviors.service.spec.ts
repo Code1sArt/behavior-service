@@ -12,6 +12,7 @@ describe('BehaviorsService write snapshots', () => {
       findUnique: jest.fn(),
     },
     user: {
+      findUnique: jest.fn(),
       findMany: jest.fn(),
     },
     behaviorRecord: {
@@ -46,6 +47,12 @@ describe('BehaviorsService write snapshots', () => {
         },
       },
     ]);
+    prisma.user.findUnique.mockResolvedValue({
+      firstName: 'สมชาย',
+      lastName: 'ใจดี',
+      lineUserId: null,
+      parent: null,
+    });
   });
 
   it('writes signed points, classroom, and term on a new record', async () => {
