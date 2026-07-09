@@ -15,10 +15,14 @@ import {
   enrollmentDataForContext,
   requireClassroomAcademicContext,
 } from './student-academic-context';
+import { LineService } from '../line/line.service';
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private lineService: LineService,
+  ) {}
 
   async create(dto: CreateStudentDto) {
     // 1. เช็คว่ามีผู้ใช้นี้อยู่แล้วหรือไม่
@@ -58,13 +62,36 @@ export class StudentsService {
   }
 
   async findAll(classroomId?: number) {
-    return this.prisma.user.findMany({
+    const students = await this.prisma.user.findMany({
       where: {
         role: Role.STUDENT,
         ...(classroomId && { classroomId }), // ถ้าส่ง classroomId มาให้กรองตามห้อง
       },
-      include: { classroom: true },
+      select: {
+        id: true,
+        citizenId: true,
+        firstName: true,
+        lastName: true,
+        classroomId: true,
+        lineUserId: true,
+        classroom: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
+
+    return Promise.all(
+      students.map(async (student) => ({
+        ...student,
+        isLineLinked: Boolean(student.lineUserId),
+        linePictureUrl: student.lineUserId
+          ? await this.lineService.getProfilePictureUrl(student.lineUserId)
+          : null,
+      })),
+    );
   }
 
   async search(query: string, limit = 30) {

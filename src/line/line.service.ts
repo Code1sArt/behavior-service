@@ -53,6 +53,22 @@ export class LineService {
     }
   }
 
+  async getProfilePictureUrl(lineUserId: string) {
+    if (!this.channelAccessToken || !lineUserId) return null;
+
+    try {
+      const profile = await this.client.getProfile(lineUserId);
+      return profile.pictureUrl ?? null;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `ไม่สามารถดึงรูปโปรไฟล์ LINE ของ ${lineUserId} ได้: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
   async findLinkedUsers() {
     return this.prisma.user.findMany({
       where: {
