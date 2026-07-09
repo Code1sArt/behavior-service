@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateBulkAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
+import { CreateBulkAttendanceDto, ManualAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
 import { AttendanceStatus, AttendanceType, Role } from '@prisma/client';
 import { LineService } from '../line/line.service'; // <--- 1. นำเข้า 
 import { AcademicCalendarService } from '../academic-calendar/academic-calendar.service';
@@ -559,6 +559,138 @@ export class AttendanceService {
         }
 
         return updatedRecord;
+    }
+
+    async upsertManualAttendance(updaterId: string, dto: ManualAttendanceDto) {
+        const targetDate = dayjs.tz(dto.date, 'YYYY-MM-DD', this.TIMEZONE);
+        const { term, schoolDayStatus } = await this.getTermSchoolDayStatus(targetDate);
+
+        if (!term) {
+            throw new BadRequestException('วันที่ที่เลือกไม่อยู่ในภาคเรียนใด');
+        }
+        if (!schoolDayStatus.isSchoolDay) {
+            throw new BadRequestException(
+                `ไม่สามารถแก้ไขการเช็คชื่อได้ เนื่องจากวันที่เลือกไม่ใช่วันเรียน (${schoolDayStatus.reason})`,
+            );
+        }
+
+        const context = await requireStudentAcademicContext(
+            this.prisma,
+            dto.studentId,
+            term.id,
+        );
+        const startOfDay = targetDate.startOf('day').toDate();
+        const endOfDay = targetDate.endOf('day').toDate();
+        const recordDate = targetDate.hour(8).minute(0).second(0).millisecond(0).toDate();
+
+        const existingRecord = await this.prisma.attendanceRecord.findFirst({
+            where: {
+                studentId: dto.studentId,
+                type: dto.type,
+                termId: term.id,
+                date: { gte: startOfDay, lte: endOfDay },
+            },
+        });
+
+        const [lateCategory, absentCategory] = await Promise.all([
+            this.prisma.pointCategory.findUnique({ where: { id: this.LATE_CATEGORY_ID } }),
+            this.prisma.pointCategory.findUnique({ where: { id: this.ABSENT_CATEGORY_ID } }),
+        ]);
+
+        const noteRef = this.attendanceBehaviorNote(dto.type);
+        const legacyNoteRef = `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${dto.type}`;
+
+        const savedRecord = await this.prisma.$transaction(async (tx) => {
+            if (existingRecord?.status === AttendanceStatus.LATE || existingRecord?.status === AttendanceStatus.ABSENT) {
+                await tx.behaviorRecord.deleteMany({
+                    where: {
+                        studentId: dto.studentId,
+                        note: { in: [noteRef, legacyNoteRef] },
+                        createdAt: { gte: startOfDay, lte: endOfDay },
+                    },
+                });
+            }
+
+            if (dto.status === AttendanceStatus.LATE && lateCategory) {
+                await tx.behaviorRecord.create({
+                    data: {
+                        points: lateCategory.defaultPoints,
+                        categoryId: this.LATE_CATEGORY_ID,
+                        studentId: dto.studentId,
+                        recorderId: updaterId,
+                        note: noteRef,
+                        createdAt: recordDate,
+                        pointDelta: calculateLegacyPointDelta({
+                            points: lateCategory.defaultPoints,
+                            category: lateCategory,
+                        }),
+                        classroomId: context.classroomId,
+                        termId: term.id,
+                    },
+                });
+            } else if (dto.status === AttendanceStatus.ABSENT && absentCategory) {
+                await tx.behaviorRecord.create({
+                    data: {
+                        points: absentCategory.defaultPoints,
+                        categoryId: this.ABSENT_CATEGORY_ID,
+                        studentId: dto.studentId,
+                        recorderId: updaterId,
+                        note: noteRef,
+                        createdAt: recordDate,
+                        pointDelta: calculateLegacyPointDelta({
+                            points: absentCategory.defaultPoints,
+                            category: absentCategory,
+                        }),
+                        classroomId: context.classroomId,
+                        termId: term.id,
+                    },
+                });
+            }
+
+            if (existingRecord) {
+                return tx.attendanceRecord.update({
+                    where: { id: existingRecord.id },
+                    data: {
+                        status: dto.status,
+                        recorderId: updaterId,
+                        classroomId: context.classroomId,
+                    },
+                });
+            }
+
+            return tx.attendanceRecord.create({
+                data: {
+                    type: dto.type,
+                    status: dto.status,
+                    date: recordDate,
+                    studentId: dto.studentId,
+                    recorderId: updaterId,
+                    termId: term.id,
+                    classroomId: context.classroomId,
+                },
+            });
+        });
+
+        const student = await this.prisma.user.findUnique({
+            where: { id: dto.studentId },
+            select: {
+                firstName: true,
+                lastName: true,
+                lineUserId: true,
+                parent: { select: { lineUserId: true } },
+            },
+        });
+
+        if (student) {
+            void this.notifyAttendanceStatus(
+                student,
+                dto.status,
+                dto.type,
+                targetDate,
+            );
+        }
+
+        return savedRecord;
     }
 
     async getStudentAttendance(studentId: string, requesterId: string, requesterRole: Role) {

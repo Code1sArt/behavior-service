@@ -1,6 +1,6 @@
 import { Controller, Post, Body, Get, Param, Patch, UseGuards, Request, Query } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
-import { CreateBulkAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
+import { CreateBulkAttendanceDto, ManualAttendanceDto, UpdateAttendanceDto } from './dto/create-attendance.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -19,6 +19,13 @@ export class AttendanceController {
     @ApiOperation({ summary: 'บันทึกการเช็คชื่อแบบกลุ่ม (ดึงคะแนนอัตโนมัติจาก PointCategory)' })
     recordBulk(@Request() req: any, @Body() dto: CreateBulkAttendanceDto) {
         return this.attendanceService.recordBulk(req.user.userId, dto);
+    }
+
+    @Post('manual')
+    @Roles(Role.ADMIN, Role.AFFAIRS)
+    @ApiOperation({ summary: 'เพิ่มหรือแก้ไขสถานะการเช็คชื่อตามวันที่สำหรับผู้ดูแลระบบ' })
+    upsertManualAttendance(@Request() req: any, @Body() dto: ManualAttendanceDto) {
+        return this.attendanceService.upsertManualAttendance(req.user.userId, dto);
     }
 
     @Patch(':id')
