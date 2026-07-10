@@ -153,7 +153,7 @@ export class BehaviorsService {
             orderBy: { createdAt: 'desc' },
             include: {
                 category: true,
-                recorder: { select: { firstName: true, lastName: true, role: true } },
+                recorder: { select: { id: true, firstName: true, lastName: true, role: true } },
             },
         });
     }
