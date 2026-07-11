@@ -5,12 +5,17 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import * as bcrypt from 'bcrypt'; // อย่าลืม import bcrypt มาใช้เข้ารหัสผ่าน
 import { Prisma, Role } from '@prisma/client';
 
+type RequestUser = {
+    userId: string;
+    role: Role;
+};
+
 @Injectable()
 export class UsersService {
     constructor(private prisma: PrismaService) { }
 
     // รับ reqUser มาจาก Token JWT เพื่อดูว่าใครเป็นคนกด request เข้ามา
-    async updateUser(targetId: string, reqUser: any, dto: UpdateUserDto) {
+    async updateUser(targetId: string, reqUser: RequestUser, dto: UpdateUserDto) {
         // 1. ตรวจสอบสิทธิ์ (Authorization)
         // ถ้าไม่ใช่ ADMIN และพยายามจะแก้ ID ที่ไม่ใช่ของตัวเอง -> เตะออกทันที
         if (reqUser.role !== Role.ADMIN && reqUser.userId !== targetId) {
@@ -18,7 +23,7 @@ export class UsersService {
         }
 
         // 2. ป้องกัน User ธรรมดาแอบเลื่อนขั้นตัวเองเป็น ADMIN (สำคัญมาก!)
-        if (reqUser.role !== Role.ADMIN && dto.role) {
+        if (reqUser.role !== Role.ADMIN && dto.role !== undefined) {
             throw new ForbiddenException('คุณไม่มีสิทธิ์เปลี่ยนระดับสิทธิ์ (Role) ด้วยตัวเอง');
         }
 
