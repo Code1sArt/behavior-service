@@ -38,10 +38,12 @@ PLESK_PORT=22
 PLESK_USER=ssh-user
 PLESK_SSH_KEY=<private deploy key>
 PLESK_DEPLOY_PATH=/var/www/vhosts/dspscare.com/behavior-service
-HEALTHCHECK_URL=https://api.example.com/
+HEALTHCHECK_URL=https://api.example.com
 ```
 
-`HEALTHCHECK_URL` is optional.
+`HEALTHCHECK_URL` is the optional service base URL. The workflow checks its
+public `/health` endpoint. A legacy value ending in `/docs` is normalized
+automatically, so disabling Swagger does not break deployment.
 
 ## Deployment mode
 
