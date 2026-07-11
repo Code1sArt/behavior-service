@@ -16,22 +16,23 @@ async function bootstrap() {
     whitelist: true, // จะตัด Field ที่ไม่ได้อยู่ใน DTO ทิ้งอัตโนมัติ
   }));
 
-  // ==========================================
-  // ตั้งค่า Swagger
-  // ==========================================
-  const config = new DocumentBuilder()
-    .setTitle('Smart School API - Behavior Services')
-    .setDescription('คู่มือการใช้งาน API สำหรับระบบบันทึกคะแนนพฤติกรรมนักเรียน')
-    .setVersion('1.0')
-    .addBearerAuth() // เปิดปุ่มให้ใส่ Token JWT ได้
-    .build();
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Smart School API - Behavior Services')
+      .setDescription('คู่มือการใช้งาน API สำหรับระบบบันทึกคะแนนพฤติกรรมนักเรียน')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  // เปิดหน้า Document ที่ URL: http://localhost:3000/docs
-  SwaggerModule.setup('docs', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document);
+  }
+
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
-  console.log(`Application is running on: http://localhost:3000`);
-  console.log(`Swagger UI is running on: http://localhost:3000/docs`);
+  console.log(`Application is running on: http://localhost:${port}`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`Swagger UI is running on: http://localhost:${port}/docs`);
+  }
 }
 bootstrap();

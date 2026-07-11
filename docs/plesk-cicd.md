@@ -8,6 +8,7 @@ This project deploys with GitHub Actions over SSH/rsync.
 2. Set the application root to the same folder used by `PLESK_DEPLOY_PATH`.
 3. Set the startup file to `dist/src/main.js`, or set the start command to `yarn start:prod` if your Plesk panel supports commands.
 4. Add production environment variables in Plesk:
+   - `NODE_ENV=production`
    - `DATABASE_URL`
    - `JWT_SECRET`
    - `PORT`
@@ -37,7 +38,7 @@ PLESK_PORT=22
 PLESK_USER=ssh-user
 PLESK_SSH_KEY=<private deploy key>
 PLESK_DEPLOY_PATH=/var/www/vhosts/dspscare.com/behavior-service
-HEALTHCHECK_URL=https://api.example.com/docs
+HEALTHCHECK_URL=https://api.example.com/
 ```
 
 `HEALTHCHECK_URL` is optional.
