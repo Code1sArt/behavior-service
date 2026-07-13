@@ -33,6 +33,8 @@ The term rollover Preview/Apply workflow is documented in
 [docs/term-rollover.md](docs/term-rollover.md).
 Annual grade promotion is documented in
 [docs/annual-promotion.md](docs/annual-promotion.md).
+Student transfer, study leave, and return-to-study are documented in
+[docs/enrollment-changes.md](docs/enrollment-changes.md).
 The staged production release checklist is documented in
 [docs/production-rollout.md](docs/production-rollout.md).
 

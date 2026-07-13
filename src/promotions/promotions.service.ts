@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  EnrollmentChangeAction,
   EnrollmentExitReason,
   EnrollmentStatus,
   Prisma,
@@ -21,6 +22,10 @@ import {
   ApplyTermRolloverDto,
   PreviewTermRolloverDto,
 } from './dto/term-rollover.dto';
+import {
+  ApplyEnrollmentChangesDto,
+  PreviewEnrollmentChangesDto,
+} from './dto/enrollment-change.dto';
 
 const rolloverRoomInclude = Prisma.validator<Prisma.ClassroomInclude>()({
   advisors: { select: { id: true } },
@@ -60,6 +65,11 @@ type RolloverRoom = Prisma.ClassroomGetPayload<{
 type RolloverClient = Pick<
   Prisma.TransactionClient,
   'academicTerm' | 'classroom' | 'promotionBatch' | 'studentEnrollment'
+>;
+
+type EnrollmentChangeClient = Pick<
+  Prisma.TransactionClient,
+  'academicTerm' | 'classroom' | 'studentEnrollment' | 'user'
 >;
 
 export interface RolloverIssue {
@@ -104,34 +114,274 @@ interface RolloverPlan {
   issues: RolloverIssue[];
 }
 
+interface PlannedEnrollmentChange {
+  studentId: string;
+  action: EnrollmentChangeAction;
+  sourceEnrollmentId: string;
+  sourceClassroomId: number;
+  targetClassroomId: number | null;
+}
+
 @Injectable()
 export class PromotionsService {
   constructor(private prisma: PrismaService) {}
 
-  async previewTermRollover(dto: PreviewTermRolloverDto) {
-    const existingBatch = await this.findExistingRollover(
-      this.prisma,
-      dto.sourceTermId,
-      dto.targetTermId,
-    );
-    const plan = await this.buildTermRolloverPlan(this.prisma, dto);
-    if (existingBatch) {
-      plan.issues.push({
-        code: 'ROLLOVER_ALREADY_APPLIED',
-        message: 'ภาคเรียนคู่นี้มีการ Apply ไปแล้ว',
-        entityId: existingBatch.id,
-      });
+  async getEnrollmentChangeCandidates(termId: number) {
+    const term = await this.prisma.academicTerm.findUnique({
+      where: { id: termId },
+    });
+    if (!term) {
+      throw new NotFoundException(`ไม่พบภาคเรียน ID: ${termId}`);
     }
+
+    const [rooms, endedEnrollments] = await Promise.all([
+      this.prisma.classroom.findMany({
+        where: { termId },
+        include: rolloverRoomInclude,
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.studentEnrollment.findMany({
+        where: {
+          status: EnrollmentStatus.ENDED,
+          student: {
+            enrollments: { none: { status: EnrollmentStatus.ACTIVE } },
+          },
+        },
+        include: {
+          student: {
+            select: {
+              id: true,
+              citizenId: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          classroom: { select: { id: true, name: true } },
+        },
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+    ]);
+
+    const latestEnrollmentByStudent = new Map<
+      string,
+      (typeof endedEnrollments)[number]
+    >();
+    for (const enrollment of endedEnrollments) {
+      if (!latestEnrollmentByStudent.has(enrollment.studentId)) {
+        latestEnrollmentByStudent.set(enrollment.studentId, enrollment);
+      }
+    }
+    const inactiveStudents = [...latestEnrollmentByStudent.values()].filter(
+      (enrollment) =>
+        enrollment.exitReason === EnrollmentExitReason.STUDY_LEAVE ||
+        enrollment.exitReason === EnrollmentExitReason.TRANSFERRED,
+    );
+
+    const serializeInactiveStudent = (
+      enrollment: (typeof endedEnrollments)[number],
+    ) => ({
+      studentId: enrollment.studentId,
+      citizenId: enrollment.student.citizenId,
+      firstName: enrollment.student.firstName,
+      lastName: enrollment.student.lastName,
+      sourceClassroomId: enrollment.classroom.id,
+      sourceClassroomName: enrollment.classroom.name,
+      endedAt: enrollment.endedAt,
+      exitReason: enrollment.exitReason,
+    });
+
+    return {
+      activeStudents: rooms.flatMap((room) =>
+        room.enrollments.map((enrollment) => ({
+          studentId: enrollment.studentId,
+          citizenId: enrollment.student.citizenId,
+          firstName: enrollment.student.firstName,
+          lastName: enrollment.student.lastName,
+          sourceClassroomId: room.id,
+          sourceClassroomName: room.name,
+        })),
+      ),
+      inactiveStudents: inactiveStudents.map(serializeInactiveStudent),
+      // คง fields เดิมไว้เพื่อไม่ให้หน้า workflow รุ่นก่อนเสีย
+      studyLeaveStudents: inactiveStudents
+        .filter(
+          (enrollment) =>
+            enrollment.exitReason === EnrollmentExitReason.STUDY_LEAVE,
+        )
+        .map(serializeInactiveStudent),
+      transferOutStudents: inactiveStudents
+        .filter(
+          (enrollment) =>
+            enrollment.exitReason === EnrollmentExitReason.TRANSFERRED,
+        )
+        .map(serializeInactiveStudent),
+    };
+  }
+
+  async previewEnrollmentChanges(dto: PreviewEnrollmentChangesDto) {
+    const plan = await this.buildEnrollmentChangePlan(this.prisma, dto);
+    return {
+      summary: {
+        total: plan.changes.length,
+        transferOut: plan.changes.filter(
+          (change) => change.action === EnrollmentChangeAction.TRANSFER_OUT,
+        ).length,
+        studyLeave: plan.changes.filter(
+          (change) => change.action === EnrollmentChangeAction.STUDY_LEAVE,
+        ).length,
+        returnToStudy: plan.changes.filter(
+          (change) => change.action === EnrollmentChangeAction.RETURN_TO_STUDY,
+        ).length,
+        blockingIssues: plan.issues.length,
+      },
+      changes: dto.changes,
+      issues: plan.issues,
+    };
+  }
+
+  async applyEnrollmentChanges(
+    adminId: string,
+    dto: ApplyEnrollmentChangesDto,
+  ) {
+    const existing = await this.prisma.enrollmentChangeBatch.findUnique({
+      where: { idempotencyKey: dto.idempotencyKey },
+      include: { items: true },
+    });
+    if (existing) {
+      this.assertEnrollmentChangeIdempotencyMatches(existing, dto);
+      return { idempotent: true, batch: existing };
+    }
+
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const plan = await this.buildEnrollmentChangePlan(tx, dto);
+          if (plan.issues.length > 0) {
+            throw new BadRequestException({
+              message: 'ไม่สามารถเปลี่ยนสถานะการลงทะเบียนได้',
+              issues: plan.issues,
+            });
+          }
+
+          const batch = await tx.enrollmentChangeBatch.create({
+            data: {
+              idempotencyKey: dto.idempotencyKey,
+              termId: dto.termId,
+              createdById: adminId,
+            },
+          });
+          const now = new Date();
+
+          for (const change of plan.changes) {
+            let targetEnrollmentId: string | null = null;
+            if (change.action === EnrollmentChangeAction.RETURN_TO_STUDY) {
+              const claimedStudent = await tx.user.updateMany({
+                where: { id: change.studentId, classroomId: null },
+                data: { classroomId: change.targetClassroomId },
+              });
+              if (claimedStudent.count !== 1) {
+                throw new ConflictException(
+                  `สถานะของนักเรียน ${change.studentId} เปลี่ยนไประหว่าง Apply`,
+                );
+              }
+              const enrollment = await tx.studentEnrollment.create({
+                data: {
+                  studentId: change.studentId,
+                  classroomId: change.targetClassroomId as number,
+                  termId: dto.termId,
+                  status: EnrollmentStatus.ACTIVE,
+                  startedAt: now,
+                },
+              });
+              targetEnrollmentId = enrollment.id;
+            } else {
+              const closed = await tx.studentEnrollment.updateMany({
+                where: {
+                  id: change.sourceEnrollmentId,
+                  status: EnrollmentStatus.ACTIVE,
+                },
+                data: {
+                  status: EnrollmentStatus.ENDED,
+                  exitReason:
+                    change.action === EnrollmentChangeAction.TRANSFER_OUT
+                      ? EnrollmentExitReason.TRANSFERRED
+                      : EnrollmentExitReason.STUDY_LEAVE,
+                  endedAt: now,
+                },
+              });
+              if (closed.count !== 1) {
+                throw new ConflictException(
+                  `Enrollment ของนักเรียน ${change.studentId} เปลี่ยนไประหว่าง Apply`,
+                );
+              }
+              await tx.user.update({
+                where: { id: change.studentId },
+                data: { classroomId: null },
+              });
+            }
+
+            await tx.enrollmentChangeItem.create({
+              data: {
+                batchId: batch.id,
+                studentId: change.studentId,
+                action: change.action,
+                sourceEnrollmentId: change.sourceEnrollmentId,
+                targetEnrollmentId,
+                sourceClassroomId: change.sourceClassroomId,
+                targetClassroomId: change.targetClassroomId,
+              },
+            });
+          }
+
+          return {
+            idempotent: false,
+            batch: await tx.enrollmentChangeBatch.findUnique({
+              where: { id: batch.id },
+              include: { items: true },
+            }),
+          };
+        },
+        { maxWait: 10_000, timeout: 300_000 },
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const concurrent = await this.prisma.enrollmentChangeBatch.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+          include: { items: true },
+        });
+        if (concurrent) {
+          this.assertEnrollmentChangeIdempotencyMatches(concurrent, dto);
+          return { idempotent: true, batch: concurrent };
+        }
+      }
+      throw error;
+    }
+  }
+
+  async previewTermRollover(dto: PreviewTermRolloverDto) {
+    const plan = await this.buildTermRolloverPlan(this.prisma, dto);
+    const neededTargetSourceIds = new Set(
+      plan.students
+        .filter((student) => student.action === PromotionAction.MOVE)
+        .map((student) => student.targetSourceClassroomId),
+    );
 
     return {
       sourceTerm: plan.sourceTerm,
       targetTerm: plan.targetTerm,
       summary: {
         classrooms: plan.rooms.length,
-        classroomsToCreate: plan.rooms.filter((room) => !room.existingTarget)
-          .length,
-        classroomsToReuse: plan.rooms.filter((room) => room.existingTarget)
-          .length,
+        classroomsToCreate: plan.rooms.filter(
+          (room) =>
+            neededTargetSourceIds.has(room.source.id) && !room.existingTarget,
+        ).length,
+        classroomsToReuse: plan.rooms.filter(
+          (room) =>
+            neededTargetSourceIds.has(room.source.id) && room.existingTarget,
+        ).length,
         students: plan.students.length,
         studentsToMove: plan.students.filter(
           (student) => student.action === PromotionAction.MOVE,
@@ -149,7 +399,8 @@ export class PromotionsService {
         sourceName: room.source.name,
         targetName: room.targetName,
         targetClassroomId: room.existingTarget?.id ?? null,
-        willCreate: !room.existingTarget,
+        willCreate:
+          neededTargetSourceIds.has(room.source.id) && !room.existingTarget,
         studentCount: room.source.enrollments.length,
       })),
       students: plan.students,
@@ -158,19 +409,16 @@ export class PromotionsService {
   }
 
   async previewAnnualPromotion(dto: PreviewAnnualPromotionDto) {
-    const existingBatch = await this.findExistingAnnualPromotion(
-      this.prisma,
-      dto.sourceTermId,
-      dto.targetTermId,
-    );
     const plan = await this.buildAnnualPromotionPlan(this.prisma, dto);
-    if (existingBatch) {
-      plan.issues.push({
-        code: 'ANNUAL_PROMOTION_ALREADY_APPLIED',
-        message: 'ปีการศึกษาคู่นี้มีการ Apply เลื่อนชั้นไปแล้ว',
-        entityId: existingBatch.id,
-      });
-    }
+    const neededTargetSourceIds = new Set(
+      plan.students
+        .filter(
+          (student) =>
+            student.action === PromotionAction.MOVE ||
+            student.action === PromotionAction.REPEAT,
+        )
+        .map((student) => student.targetSourceClassroomId),
+    );
 
     return {
       sourceTerm: plan.sourceTerm,
@@ -178,10 +426,12 @@ export class PromotionsService {
       summary: {
         classroomMappings: plan.rooms.length,
         classroomsToCreate: plan.rooms.filter(
-          (room) => room.targetName !== null && !room.existingTarget,
+          (room) =>
+            neededTargetSourceIds.has(room.source.id) && !room.existingTarget,
         ).length,
         classroomsToReuse: plan.rooms.filter(
-          (room) => room.targetName !== null && room.existingTarget,
+          (room) =>
+            neededTargetSourceIds.has(room.source.id) && room.existingTarget,
         ).length,
         students: plan.students.length,
         studentsToMove: plan.students.filter(
@@ -206,7 +456,8 @@ export class PromotionsService {
         sourceName: room.source.name,
         targetName: room.targetName,
         targetClassroomId: room.existingTarget?.id ?? null,
-        willCreate: room.targetName !== null && room.existingTarget === null,
+        willCreate:
+          neededTargetSourceIds.has(room.source.id) && !room.existingTarget,
         studentCount: room.source.enrollments.length,
       })),
       students: plan.students,
@@ -232,15 +483,6 @@ export class PromotionsService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const existingPromotion = await this.findExistingAnnualPromotion(
-            tx,
-            dto.sourceTermId,
-            dto.targetTermId,
-          );
-          if (existingPromotion) {
-            return { idempotent: true, batch: existingPromotion };
-          }
-
           const plan = await this.buildAnnualPromotionPlan(tx, dto);
           if (plan.issues.length > 0) {
             throw new BadRequestException({
@@ -279,14 +521,6 @@ export class PromotionsService {
           );
           return { idempotent: true, batch: existingByIdempotencyKey };
         }
-        const existingPromotion = await this.findExistingAnnualPromotion(
-          this.prisma,
-          dto.sourceTermId,
-          dto.targetTermId,
-        );
-        if (existingPromotion) {
-          return { idempotent: true, batch: existingPromotion };
-        }
       }
       throw error;
     }
@@ -310,15 +544,6 @@ export class PromotionsService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const existingRollover = await this.findExistingRollover(
-            tx,
-            dto.sourceTermId,
-            dto.targetTermId,
-          );
-          if (existingRollover) {
-            return { idempotent: true, batch: existingRollover };
-          }
-
           const plan = await this.buildTermRolloverPlan(tx, dto);
           if (plan.issues.length > 0) {
             throw new BadRequestException({
@@ -357,14 +582,6 @@ export class PromotionsService {
           );
           return { idempotent: true, batch: existingByIdempotencyKey };
         }
-        const existingRollover = await this.findExistingRollover(
-          this.prisma,
-          dto.sourceTermId,
-          dto.targetTermId,
-        );
-        if (existingRollover) {
-          return { idempotent: true, batch: existingRollover };
-        }
       }
       throw error;
     }
@@ -390,8 +607,22 @@ export class PromotionsService {
     });
 
     const targetClassroomBySourceId = new Map<number, number>();
+    const neededTargetSourceIds = new Set(
+      plan.students
+        .filter(
+          (student) =>
+            student.action === PromotionAction.MOVE ||
+            student.action === PromotionAction.REPEAT,
+        )
+        .map((student) => student.targetSourceClassroomId as number),
+    );
     for (const room of plan.rooms) {
-      if (room.targetName === null) continue;
+      if (
+        room.targetName === null ||
+        !neededTargetSourceIds.has(room.source.id)
+      ) {
+        continue;
+      }
 
       const target = room.existingTarget
         ? await tx.classroom.update({
@@ -565,38 +796,222 @@ export class PromotionsService {
     }
   }
 
-  private findExistingRollover(
-    prisma: RolloverClient,
-    sourceTermId: number,
-    targetTermId: number,
-  ) {
-    return prisma.promotionBatch.findUnique({
-      where: {
-        type_sourceTermId_targetTermId: {
-          type: PromotionType.TERM_ROLLOVER,
-          sourceTermId,
-          targetTermId,
-        },
-      },
-      include: { items: true },
+  private async buildEnrollmentChangePlan(
+    prisma: EnrollmentChangeClient,
+    dto: PreviewEnrollmentChangesDto,
+  ): Promise<{
+    changes: PlannedEnrollmentChange[];
+    issues: RolloverIssue[];
+  }> {
+    const term = await prisma.academicTerm.findUnique({
+      where: { id: dto.termId },
     });
+    if (!term) {
+      throw new NotFoundException(`ไม่พบภาคเรียน ID: ${dto.termId}`);
+    }
+
+    const issues: RolloverIssue[] = [];
+    const requestedByStudent = new Map<string, (typeof dto.changes)[number]>();
+    for (const change of dto.changes) {
+      if (requestedByStudent.has(change.studentId)) {
+        issues.push({
+          code: 'DUPLICATE_STUDENT_CHANGE',
+          message: 'ระบุนักเรียนซ้ำในคำขอเดียวกัน',
+          entityId: change.studentId,
+        });
+        continue;
+      }
+      requestedByStudent.set(change.studentId, change);
+    }
+
+    const studentIds = [...requestedByStudent.keys()];
+    const targetClassroomIds = [
+      ...new Set(
+        dto.changes
+          .map((change) => change.targetClassroomId)
+          .filter((id): id is number => id !== undefined),
+      ),
+    ];
+    const [activeEnrollments, studyLeaves, targetClassrooms, students] =
+      await Promise.all([
+        prisma.studentEnrollment.findMany({
+          where: {
+            studentId: { in: studentIds },
+            status: EnrollmentStatus.ACTIVE,
+          },
+          include: {
+            student: { select: { classroomId: true } },
+          },
+        }),
+        prisma.studentEnrollment.findMany({
+          where: {
+            studentId: { in: studentIds },
+            status: EnrollmentStatus.ENDED,
+          },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        }),
+        prisma.classroom.findMany({
+          where: { id: { in: targetClassroomIds }, termId: dto.termId },
+          select: { id: true },
+        }),
+        prisma.user.findMany({
+          where: { id: { in: studentIds } },
+          select: { id: true, classroomId: true },
+        }),
+      ]);
+
+    const activeByStudent = new Map<
+      string,
+      (typeof activeEnrollments)[number]
+    >();
+    const duplicateActiveStudentIds = new Set<string>();
+    for (const enrollment of activeEnrollments) {
+      if (activeByStudent.has(enrollment.studentId)) {
+        duplicateActiveStudentIds.add(enrollment.studentId);
+      } else {
+        activeByStudent.set(enrollment.studentId, enrollment);
+      }
+    }
+    const latestEnrollmentByStudent = new Map<
+      string,
+      (typeof studyLeaves)[number]
+    >();
+    for (const enrollment of studyLeaves) {
+      if (!latestEnrollmentByStudent.has(enrollment.studentId)) {
+        latestEnrollmentByStudent.set(enrollment.studentId, enrollment);
+      }
+    }
+    const validTargetIds = new Set(targetClassrooms.map((room) => room.id));
+    const studentById = new Map(
+      students.map((student) => [student.id, student]),
+    );
+    const planned: PlannedEnrollmentChange[] = [];
+
+    for (const change of requestedByStudent.values()) {
+      const active = activeByStudent.get(change.studentId);
+      const latestEnrollment = latestEnrollmentByStudent.get(change.studentId);
+      const previousInactiveEnrollment =
+        latestEnrollment?.exitReason === EnrollmentExitReason.STUDY_LEAVE ||
+        latestEnrollment?.exitReason === EnrollmentExitReason.TRANSFERRED
+          ? latestEnrollment
+          : undefined;
+
+      if (change.action === EnrollmentChangeAction.RETURN_TO_STUDY) {
+        if (active || duplicateActiveStudentIds.has(change.studentId)) {
+          issues.push({
+            code: 'STUDENT_ALREADY_ACTIVE',
+            message: 'นักเรียนมีการลงทะเบียนที่กำลังใช้งานอยู่แล้ว',
+            entityId: change.studentId,
+          });
+          continue;
+        }
+        if (studentById.get(change.studentId)?.classroomId !== null) {
+          issues.push({
+            code: 'STUDENT_CLASSROOM_OCCUPIED',
+            message: 'นักเรียนมีห้องปัจจุบันอยู่แล้ว',
+            entityId: change.studentId,
+          });
+          continue;
+        }
+        if (!previousInactiveEnrollment) {
+          issues.push({
+            code: 'INACTIVE_ENROLLMENT_NOT_FOUND',
+            message: 'ไม่พบประวัติย้ายออกหรือพักการเรียนสำหรับรับเข้า',
+            entityId: change.studentId,
+          });
+          continue;
+        }
+        if (
+          change.targetClassroomId === undefined ||
+          !validTargetIds.has(change.targetClassroomId)
+        ) {
+          issues.push({
+            code: 'RETURN_CLASSROOM_INVALID',
+            message: 'กรุณาเลือกห้องรับกลับที่อยู่ในภาคเรียนที่ดำเนินการ',
+            entityId: change.studentId,
+          });
+          continue;
+        }
+        planned.push({
+          studentId: change.studentId,
+          action: change.action,
+          sourceEnrollmentId: previousInactiveEnrollment.id,
+          sourceClassroomId: previousInactiveEnrollment.classroomId,
+          targetClassroomId: change.targetClassroomId,
+        });
+        continue;
+      }
+
+      if (!active || active.termId !== dto.termId) {
+        issues.push({
+          code: 'ACTIVE_ENROLLMENT_NOT_FOUND',
+          message: 'ไม่พบการลงทะเบียนที่กำลังใช้งานในภาคเรียนที่เลือก',
+          entityId: change.studentId,
+        });
+        continue;
+      }
+      if (
+        duplicateActiveStudentIds.has(change.studentId) ||
+        active.student.classroomId !== active.classroomId
+      ) {
+        issues.push({
+          code: 'ACTIVE_ENROLLMENT_CONFLICT',
+          message: 'ข้อมูลห้องปัจจุบันและการลงทะเบียนของนักเรียนไม่สอดคล้องกัน',
+          entityId: change.studentId,
+        });
+        continue;
+      }
+      if (change.targetClassroomId !== undefined) {
+        issues.push({
+          code: 'EXIT_TARGET_NOT_ALLOWED',
+          message: 'การย้ายออกหรือพักการเรียนต้องไม่ระบุห้องปลายทาง',
+          entityId: change.studentId,
+        });
+        continue;
+      }
+      planned.push({
+        studentId: change.studentId,
+        action: change.action,
+        sourceEnrollmentId: active.id,
+        sourceClassroomId: active.classroomId,
+        targetClassroomId: null,
+      });
+    }
+
+    return { changes: planned, issues };
   }
 
-  private findExistingAnnualPromotion(
-    prisma: RolloverClient,
-    sourceTermId: number,
-    targetTermId: number,
+  private assertEnrollmentChangeIdempotencyMatches(
+    existing: {
+      termId: number;
+      items: Array<{
+        studentId: string;
+        action: EnrollmentChangeAction;
+        targetClassroomId: number | null;
+      }>;
+    },
+    dto: ApplyEnrollmentChangesDto,
   ) {
-    return prisma.promotionBatch.findUnique({
-      where: {
-        type_sourceTermId_targetTermId: {
-          type: PromotionType.ANNUAL_PROMOTION,
-          sourceTermId,
-          targetTermId,
-        },
-      },
-      include: { items: true },
-    });
+    const existingSignature = existing.items
+      .map(
+        (item) =>
+          `${item.studentId}:${item.action}:${item.targetClassroomId ?? ''}`,
+      )
+      .sort()
+      .join('|');
+    const requestSignature = dto.changes
+      .map(
+        (item) =>
+          `${item.studentId}:${item.action}:${item.targetClassroomId ?? ''}`,
+      )
+      .sort()
+      .join('|');
+    if (
+      existing.termId !== dto.termId ||
+      existingSignature !== requestSignature
+    ) {
+      throw new ConflictException('idempotencyKey นี้ถูกใช้กับคำขออื่นแล้ว');
+    }
   }
 
   private async buildAnnualPromotionPlan(
@@ -627,7 +1042,7 @@ export class PromotionsService {
       );
     }
 
-    const [sourceRooms, targetRooms] = await Promise.all([
+    const [allSourceRooms, targetRooms] = await Promise.all([
       prisma.classroom.findMany({
         where: { termId: sourceTerm.id },
         include: rolloverRoomInclude,
@@ -640,7 +1055,25 @@ export class PromotionsService {
       }),
     ]);
     const issues: RolloverIssue[] = [];
-    if (sourceRooms.length === 0) {
+    const allSourceRoomById = new Map(
+      allSourceRooms.map((room) => [room.id, room]),
+    );
+    const selectedIds = dto.selectedClassroomIds
+      ? new Set(dto.selectedClassroomIds)
+      : new Set(allSourceRooms.map((room) => room.id));
+    for (const id of selectedIds) {
+      if (!allSourceRoomById.has(id)) {
+        issues.push({
+          code: 'UNKNOWN_SELECTED_CLASSROOM',
+          message: 'ห้องที่เลือกไม่ได้อยู่ในภาคเรียนต้นทาง',
+          entityId: id,
+        });
+      }
+    }
+    const sourceRooms = allSourceRooms.filter((room) =>
+      selectedIds.has(room.id),
+    );
+    if (allSourceRooms.length === 0) {
       issues.push({
         code: 'SOURCE_HAS_NO_CLASSROOMS',
         message: 'ภาคเรียนต้นทางไม่มีห้องเรียน',
@@ -736,19 +1169,6 @@ export class PromotionsService {
         });
       }
       const existingTarget = matches[0] ?? null;
-      if (
-        existingTarget &&
-        (existingTarget.students.length > 0 ||
-          existingTarget._count.enrollments > 0 ||
-          existingTarget._count.attendanceRecords > 0 ||
-          existingTarget._count.behaviorRecords > 0)
-      ) {
-        issues.push({
-          code: 'TARGET_CLASSROOM_NOT_EMPTY',
-          message: `ห้องปลายทาง "${targetName}" มีข้อมูลอยู่แล้ว`,
-          entityId: existingTarget.id,
-        });
-      }
       return { source, targetName, existingTarget };
     });
 
@@ -946,7 +1366,7 @@ export class PromotionsService {
       );
     }
 
-    const [sourceRooms, targetRooms] = await Promise.all([
+    const [allSourceRooms, targetRooms] = await Promise.all([
       prisma.classroom.findMany({
         where: { termId: sourceTerm.id },
         include: rolloverRoomInclude,
@@ -960,7 +1380,25 @@ export class PromotionsService {
     ]);
 
     const issues: RolloverIssue[] = [];
-    if (sourceRooms.length === 0) {
+    const allSourceRoomById = new Map(
+      allSourceRooms.map((room) => [room.id, room]),
+    );
+    const selectedIds = dto.selectedClassroomIds
+      ? new Set(dto.selectedClassroomIds)
+      : new Set(allSourceRooms.map((room) => room.id));
+    for (const id of selectedIds) {
+      if (!allSourceRoomById.has(id)) {
+        issues.push({
+          code: 'UNKNOWN_SELECTED_CLASSROOM',
+          message: 'ห้องที่เลือกไม่ได้อยู่ในภาคเรียนต้นทาง',
+          entityId: id,
+        });
+      }
+    }
+    const sourceRooms = allSourceRooms.filter((room) =>
+      selectedIds.has(room.id),
+    );
+    if (allSourceRooms.length === 0) {
       issues.push({
         code: 'SOURCE_HAS_NO_CLASSROOMS',
         message: 'ภาคเรียนต้นทางไม่มีห้องเรียน',
@@ -1011,19 +1449,6 @@ export class PromotionsService {
         });
       }
       const existingTarget = matches[0] ?? null;
-      if (
-        existingTarget &&
-        (existingTarget.students.length > 0 ||
-          existingTarget._count.enrollments > 0 ||
-          existingTarget._count.attendanceRecords > 0 ||
-          existingTarget._count.behaviorRecords > 0)
-      ) {
-        issues.push({
-          code: 'TARGET_CLASSROOM_NOT_EMPTY',
-          message: `ห้องปลายทาง "${targetName}" มีนักเรียนอยู่แล้ว`,
-          entityId: existingTarget.id,
-        });
-      }
       return { source, targetName, existingTarget };
     });
 
@@ -1160,7 +1585,7 @@ export class PromotionsService {
     for (const room of sourceRooms) {
       for (const enrollment of room.enrollments) {
         const override = overrides.get(enrollment.studentId);
-        const action = override?.action ?? PromotionAction.MOVE;
+        const action = override?.action ?? PromotionAction.SKIP;
         const targetSourceClassroomId =
           action === PromotionAction.MOVE
             ? (override?.targetSourceClassroomId ?? room.id)

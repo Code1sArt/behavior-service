@@ -1,4 +1,13 @@
-import { Body, Controller, Post, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  ParseIntPipe,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import type { Request as ExpressRequest } from 'express';
@@ -14,6 +23,10 @@ import {
   PreviewTermRolloverDto,
 } from './dto/term-rollover.dto';
 import { PromotionsService } from './promotions.service';
+import {
+  ApplyEnrollmentChangesDto,
+  PreviewEnrollmentChangesDto,
+} from './dto/enrollment-change.dto';
 
 interface AuthenticatedRequest extends ExpressRequest {
   user: {
@@ -29,6 +42,30 @@ interface AuthenticatedRequest extends ExpressRequest {
 @Controller('promotions')
 export class PromotionsController {
   constructor(private readonly promotionsService: PromotionsService) {}
+
+  @Get('enrollment-changes/candidates')
+  @ApiOperation({ summary: 'รายชื่อนักเรียนที่ย้าย/พักหรือรับกลับได้' })
+  getEnrollmentChangeCandidates(@Query('termId', ParseIntPipe) termId: number) {
+    return this.promotionsService.getEnrollmentChangeCandidates(termId);
+  }
+
+  @Post('enrollment-changes/preview')
+  @ApiOperation({ summary: 'ตรวจสอบแผนย้ายออก พัก หรือรับกลับ' })
+  previewEnrollmentChanges(@Body() dto: PreviewEnrollmentChangesDto) {
+    return this.promotionsService.previewEnrollmentChanges(dto);
+  }
+
+  @Post('enrollment-changes/apply')
+  @ApiOperation({ summary: 'ยืนยันย้ายออก พัก หรือรับกลับแบบ transaction' })
+  applyEnrollmentChanges(
+    @Body() dto: ApplyEnrollmentChangesDto,
+    @Request() request: AuthenticatedRequest,
+  ) {
+    return this.promotionsService.applyEnrollmentChanges(
+      request.user.userId,
+      dto,
+    );
+  }
 
   @Post('term-rollover/preview')
   @ApiOperation({
