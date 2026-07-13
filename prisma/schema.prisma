@@ -43,6 +43,7 @@ enum EnrollmentExitReason {
   REPEATED
   TRANSFERRED
   GRADUATED
+  STUDY_LEAVE
 }
 
 enum PromotionType {
@@ -63,6 +64,12 @@ enum PromotionAction {
   GRADUATE
   TRANSFER_OUT
   SKIP
+}
+
+enum EnrollmentChangeAction {
+  TRANSFER_OUT
+  STUDY_LEAVE
+  RETURN_TO_STUDY
 }
 
 // -------------------------------------------------------------
@@ -98,8 +105,10 @@ model User {
   pointAccount       StudentPointAccount?
   promotionItems     PromotionItem[]
 
-  promotionBatchesCreated PromotionBatch[] @relation("PromotionCreatedBy")
-  promotionBatchesApplied PromotionBatch[] @relation("PromotionAppliedBy")
+  promotionBatchesCreated        PromotionBatch[]        @relation("PromotionCreatedBy")
+  promotionBatchesApplied        PromotionBatch[]        @relation("PromotionAppliedBy")
+  enrollmentChangeBatchesCreated EnrollmentChangeBatch[] @relation("EnrollmentChangeCreatedBy")
+  enrollmentChangeItems          EnrollmentChangeItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -126,8 +135,9 @@ model AcademicTerm {
   behaviors   BehaviorRecord[]
   enrollments StudentEnrollment[]
 
-  sourcePromotionBatches PromotionBatch[] @relation("PromotionSourceTerm")
-  targetPromotionBatches PromotionBatch[] @relation("PromotionTargetTerm")
+  sourcePromotionBatches  PromotionBatch[]        @relation("PromotionSourceTerm")
+  targetPromotionBatches  PromotionBatch[]        @relation("PromotionTargetTerm")
+  enrollmentChangeBatches EnrollmentChangeBatch[]
 
   @@unique([year, term]) // ป้องกันการสร้างปีการศึกษาและเทอมซ้ำกัน
 }
@@ -165,8 +175,10 @@ model Classroom {
   attendanceRecords AttendanceRecord[]
   behaviorRecords   BehaviorRecord[]
 
-  sourcePromotionItems PromotionItem[] @relation("PromotionSourceClassroom")
-  targetPromotionItems PromotionItem[] @relation("PromotionTargetClassroom")
+  sourcePromotionItems        PromotionItem[]        @relation("PromotionSourceClassroom")
+  targetPromotionItems        PromotionItem[]        @relation("PromotionTargetClassroom")
+  sourceEnrollmentChangeItems EnrollmentChangeItem[] @relation("EnrollmentChangeSourceClassroom")
+  targetEnrollmentChangeItems EnrollmentChangeItem[] @relation("EnrollmentChangeTargetClassroom")
 }
 
 model StudentPointAccount {
@@ -197,6 +209,9 @@ model StudentEnrollment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  sourceEnrollmentChangeItems EnrollmentChangeItem[] @relation("EnrollmentChangeSourceEnrollment")
+  targetEnrollmentChangeItems EnrollmentChangeItem[] @relation("EnrollmentChangeTargetEnrollment")
+
   @@index([studentId, status])
   @@index([classroomId])
   @@index([termId])
@@ -226,7 +241,6 @@ model PromotionBatch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([type, sourceTermId, targetTermId])
   @@index([sourceTermId])
   @@index([targetTermId])
   @@index([status])
@@ -254,6 +268,55 @@ model PromotionItem {
 
   @@unique([batchId, studentId])
   @@index([studentId])
+  @@index([sourceClassroomId])
+  @@index([targetClassroomId])
+}
+
+model EnrollmentChangeBatch {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  termId         Int
+  createdById    String
+  appliedAt      DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  term      AcademicTerm           @relation(fields: [termId], references: [id], onDelete: Restrict)
+  createdBy User                   @relation("EnrollmentChangeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  items     EnrollmentChangeItem[]
+
+  @@index([termId])
+  @@index([createdById])
+  @@index([appliedAt])
+}
+
+model EnrollmentChangeItem {
+  id     String                 @id @default(uuid())
+  action EnrollmentChangeAction
+
+  batchId String
+  batch   EnrollmentChangeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  sourceEnrollmentId String?
+  sourceEnrollment   StudentEnrollment? @relation("EnrollmentChangeSourceEnrollment", fields: [sourceEnrollmentId], references: [id], onDelete: Restrict)
+
+  targetEnrollmentId String?
+  targetEnrollment   StudentEnrollment? @relation("EnrollmentChangeTargetEnrollment", fields: [targetEnrollmentId], references: [id], onDelete: Restrict)
+
+  sourceClassroomId Int?
+  sourceClassroom   Classroom? @relation("EnrollmentChangeSourceClassroom", fields: [sourceClassroomId], references: [id], onDelete: Restrict)
+
+  targetClassroomId Int?
+  targetClassroom   Classroom? @relation("EnrollmentChangeTargetClassroom", fields: [targetClassroomId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, studentId])
+  @@index([studentId])
+  @@index([sourceEnrollmentId])
+  @@index([targetEnrollmentId])
   @@index([sourceClassroomId])
   @@index([targetClassroomId])
 }

@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayNotEmpty,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -50,6 +51,16 @@ export class PreviewTermRolloverDto {
   @ApiProperty({ example: 2 })
   @IsInt()
   targetTermId!: number;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    description: 'ห้องต้นทางที่ผู้ดูแลเลือกดำเนินการ',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsInt({ each: true })
+  selectedClassroomIds?: number[];
 
   @ApiPropertyOptional({ type: [TermRolloverClassroomMappingDto] })
   @IsOptional()

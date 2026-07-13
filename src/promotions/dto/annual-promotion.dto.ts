@@ -47,6 +47,16 @@ export class PreviewAnnualPromotionDto {
   @IsInt()
   targetTermId!: number;
 
+  @ApiPropertyOptional({
+    type: [Number],
+    description: 'ห้องต้นทางที่ผู้ดูแลเลือกดำเนินการ',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsInt({ each: true })
+  selectedClassroomIds?: number[];
+
   @ApiProperty({ type: [AnnualClassroomMappingDto] })
   @IsArray()
   @ArrayNotEmpty()

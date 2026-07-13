@@ -164,8 +164,9 @@ describe('PromotionsService term rollover', () => {
 
     expect(result.summary).toEqual(
       expect.objectContaining({
-        classroomsToCreate: 1,
-        studentsToMove: 1,
+        classroomsToCreate: 0,
+        studentsToMove: 0,
+        studentsToSkip: 1,
         blockingIssues: 0,
       }),
     );
@@ -175,7 +176,7 @@ describe('PromotionsService term rollover', () => {
         citizenId: '1234567890123',
         firstName: 'สมชาย',
         lastName: 'ใจดี',
-        action: PromotionAction.MOVE,
+        action: PromotionAction.SKIP,
       }),
     ]);
     expect(mock.classroomCreate).not.toHaveBeenCalled();
@@ -192,6 +193,12 @@ describe('PromotionsService term rollover', () => {
       targetTermId: 2,
       idempotencyKey: 'rollover-2569-term-2',
       activateTargetTerm: true,
+      studentOverrides: [
+        {
+          studentId: 'student-1',
+          action: PromotionAction.MOVE,
+        },
+      ],
     });
     const captured = mock.getArguments();
     const createdClassroom = captured.createClassroomArguments as {

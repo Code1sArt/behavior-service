@@ -61,11 +61,15 @@ export class StudentsService {
     });
   }
 
-  async findAll(classroomId?: number) {
+  async findAll(classroomId?: number | null) {
     const students = await this.prisma.user.findMany({
       where: {
         role: Role.STUDENT,
-        ...(classroomId && { classroomId }), // ถ้าส่ง classroomId มาให้กรองตามห้อง
+        ...(classroomId === null
+          ? { classroomId: null }
+          : classroomId !== undefined
+            ? { classroomId }
+            : {}),
       },
       select: {
         id: true,
