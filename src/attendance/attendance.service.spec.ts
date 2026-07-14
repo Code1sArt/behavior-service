@@ -167,6 +167,50 @@ describe('AttendanceService', () => {
     });
   });
 
+  it.each([AttendanceStatus.LATE, AttendanceStatus.ABSENT])(
+    'does not auto-deduct points for AREA status %s',
+    async (status) => {
+      findActiveTerm.mockResolvedValue({ id: 1 });
+      getSchoolDayStatus.mockResolvedValue({
+        isSchoolDay: true,
+        reason: null,
+      });
+      findAttendanceRecords.mockResolvedValue([]);
+      findStudents.mockResolvedValue([
+        {
+          id: 'student-1',
+          firstName: 'สมชาย',
+          lastName: 'ใจดี',
+          lineUserId: null,
+          parent: null,
+          classroom: {
+            id: 10,
+            termId: 1,
+            startingPoints: 100,
+            term: {
+              isActive: true,
+              startDate: new Date('2026-05-01T00:00:00.000Z'),
+              endDate: new Date('2026-10-01T00:00:00.000Z'),
+            },
+          },
+        },
+      ]);
+      findPointCategory.mockResolvedValue({
+        defaultPoints: 2,
+        type: PointType.DEDUCT,
+      });
+      createAttendances.mockResolvedValue({ count: 1 });
+
+      const result = await service.recordBulk('recorder-1', {
+        type: AttendanceType.AREA,
+        records: [{ studentId: 'student-1', status }],
+      });
+
+      expect(createBehaviors).not.toHaveBeenCalled();
+      expect(result.autoDeducted).toBe(0);
+    },
+  );
+
   it('returns an empty missing report when the date is not a school day', async () => {
     findActiveTerm.mockResolvedValue({ id: 1 });
     getSchoolDayStatus.mockResolvedValue({

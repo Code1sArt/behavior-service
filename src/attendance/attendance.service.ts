@@ -41,6 +41,10 @@ export class AttendanceService {
         return type === AttendanceType.ASSEMBLY ? 'เข้าแถว' : 'เขตพื้นที่';
     }
 
+    private shouldAutoDeduct(type: AttendanceType) {
+        return type !== AttendanceType.AREA;
+    }
+
     private async notifyAttendanceStatus(
         student: {
             firstName: string;
@@ -57,7 +61,9 @@ export class AttendanceService {
         }
 
         const statusText = status === AttendanceStatus.LATE ? 'มาสาย' : 'ขาด';
-        const behaviorText = ' และถูกหักคะแนนพฤติกรรมอัตโนมัติ';
+        const behaviorText = this.shouldAutoDeduct(type)
+            ? ' และถูกหักคะแนนพฤติกรรมอัตโนมัติ'
+            : '';
         const message =
             `🔔 [แจ้งเตือนการเช็คชื่อ]\n` +
             `${student.firstName} ${student.lastName} มีสถานะ "${statusText}" ` +
@@ -392,40 +398,42 @@ export class AttendanceService {
             });
             const createdAttendances = await tx.attendanceRecord.createMany({ data: attendanceData });
 
-            // 4. หักคะแนน
+            // 4. หักคะแนนเฉพาะการเช็คชื่อเข้าแถว (เขตพื้นที่ไม่หักคะแนน)
             const behaviorData: any[] = [];
             const notePrefix = this.attendanceBehaviorNote(dto.type);
 
-            for (const record of newRecords) {
-                const context = studentContexts.get(record.studentId)!;
-                if (record.status === AttendanceStatus.LATE && lateCategory) {
-                    behaviorData.push({
-                        points: lateCategory.defaultPoints,
-                        categoryId: this.LATE_CATEGORY_ID,
-                        studentId: record.studentId,
-                        recorderId: recorderId,
-                        note: notePrefix,
-                        pointDelta: calculateLegacyPointDelta({
+            if (this.shouldAutoDeduct(dto.type)) {
+                for (const record of newRecords) {
+                    const context = studentContexts.get(record.studentId)!;
+                    if (record.status === AttendanceStatus.LATE && lateCategory) {
+                        behaviorData.push({
                             points: lateCategory.defaultPoints,
-                            category: lateCategory,
-                        }),
-                        classroomId: context.classroomId,
-                        termId: activeTerm.id,
-                    });
-                } else if (record.status === AttendanceStatus.ABSENT && absentCategory) {
-                    behaviorData.push({
-                        points: absentCategory.defaultPoints,
-                        categoryId: this.ABSENT_CATEGORY_ID,
-                        studentId: record.studentId,
-                        recorderId: recorderId,
-                        note: notePrefix,
-                        pointDelta: calculateLegacyPointDelta({
+                            categoryId: this.LATE_CATEGORY_ID,
+                            studentId: record.studentId,
+                            recorderId: recorderId,
+                            note: notePrefix,
+                            pointDelta: calculateLegacyPointDelta({
+                                points: lateCategory.defaultPoints,
+                                category: lateCategory,
+                            }),
+                            classroomId: context.classroomId,
+                            termId: activeTerm.id,
+                        });
+                    } else if (record.status === AttendanceStatus.ABSENT && absentCategory) {
+                        behaviorData.push({
                             points: absentCategory.defaultPoints,
-                            category: absentCategory,
-                        }),
-                        classroomId: context.classroomId,
-                        termId: activeTerm.id,
-                    });
+                            categoryId: this.ABSENT_CATEGORY_ID,
+                            studentId: record.studentId,
+                            recorderId: recorderId,
+                            note: notePrefix,
+                            pointDelta: calculateLegacyPointDelta({
+                                points: absentCategory.defaultPoints,
+                                category: absentCategory,
+                            }),
+                            classroomId: context.classroomId,
+                            termId: activeTerm.id,
+                        });
+                    }
                 }
             }
 
@@ -433,7 +441,7 @@ export class AttendanceService {
                 await tx.behaviorRecord.createMany({ data: behaviorData });
             }
 
-            // 5. ส่ง LINE แจ้งเตือน (ลูปเฉพาะเด็กที่ต้องถูกหักคะแนน)
+            // 5. ส่ง LINE แจ้งเตือนสถานะขาด/มาสาย (AREA จะแจ้งโดยไม่ระบุว่าถูกหักคะแนน)
             for (const record of newRecords) {
                 const student = studentsToNotify.find(s => s.id === record.studentId);
 
@@ -495,7 +503,7 @@ export class AttendanceService {
                 });
             }
 
-            if (dto.status === AttendanceStatus.LATE && lateCategory) {
+            if (this.shouldAutoDeduct(existingRecord.type) && dto.status === AttendanceStatus.LATE && lateCategory) {
                 await tx.behaviorRecord.create({
                     data: {
                         points: lateCategory.defaultPoints,
@@ -511,7 +519,7 @@ export class AttendanceService {
                         termId: existingRecord.termId,
                     },
                 });
-            } else if (dto.status === AttendanceStatus.ABSENT && absentCategory) {
+            } else if (this.shouldAutoDeduct(existingRecord.type) && dto.status === AttendanceStatus.ABSENT && absentCategory) {
                 await tx.behaviorRecord.create({
                     data: {
                         points: absentCategory.defaultPoints,
@@ -611,7 +619,7 @@ export class AttendanceService {
                 });
             }
 
-            if (dto.status === AttendanceStatus.LATE && lateCategory) {
+            if (this.shouldAutoDeduct(dto.type) && dto.status === AttendanceStatus.LATE && lateCategory) {
                 await tx.behaviorRecord.create({
                     data: {
                         points: lateCategory.defaultPoints,
@@ -628,7 +636,7 @@ export class AttendanceService {
                         termId: term.id,
                     },
                 });
-            } else if (dto.status === AttendanceStatus.ABSENT && absentCategory) {
+            } else if (this.shouldAutoDeduct(dto.type) && dto.status === AttendanceStatus.ABSENT && absentCategory) {
                 await tx.behaviorRecord.create({
                     data: {
                         points: absentCategory.defaultPoints,
