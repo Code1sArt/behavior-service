@@ -1,4 +1,8 @@
-import { PointType } from '@prisma/client';
+import {
+  EnrollmentExitReason,
+  EnrollmentStatus,
+  PointType,
+} from '@prisma/client';
 import { SummaryService } from './summary.service';
 
 describe('SummaryService', () => {
@@ -105,6 +109,8 @@ describe('SummaryService', () => {
         students: [],
         enrollments: [
           {
+            status: EnrollmentStatus.ENDED,
+            exitReason: EnrollmentExitReason.TERM_COMPLETED,
             student: {
               id: 'student-1',
               citizenId: '10001',
@@ -138,5 +144,48 @@ describe('SummaryService', () => {
         score: 95,
       }),
     );
+  });
+
+  it('excludes transferred and study-leave students from school totals', async () => {
+    const makeEnrollment = (id: string, exitReason: EnrollmentExitReason) => ({
+      status: EnrollmentStatus.ENDED,
+      exitReason,
+      student: {
+        id,
+        citizenId: id,
+        firstName: id,
+        lastName: 'student',
+        pointAccount: { initialPoints: 100 },
+        behaviorLogs: [],
+      },
+    });
+    prisma.classroom.findMany.mockResolvedValue([
+      {
+        ...classroom,
+        term: { endDate: new Date('2026-10-01T00:00:00.000Z') },
+        students: [],
+        enrollments: [
+          makeEnrollment(
+            'student-transferred',
+            EnrollmentExitReason.TRANSFERRED,
+          ),
+          makeEnrollment(
+            'student-study-leave',
+            EnrollmentExitReason.STUDY_LEAVE,
+          ),
+          makeEnrollment(
+            'student-completed',
+            EnrollmentExitReason.TERM_COMPLETED,
+          ),
+        ],
+      },
+    ]);
+
+    const result = await service.getSchoolWideSummary(1);
+
+    expect(result.summary.total).toBe(1);
+    expect(result.lists.shield.map((student) => student.id)).toEqual([
+      'student-completed',
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { EnrollmentExitReason, EnrollmentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
@@ -57,17 +58,39 @@ export class ClassroomsService {
     }
 
     async findAll() {
-        return this.prisma.classroom.findMany({
+        const classrooms = await this.prisma.classroom.findMany({
             include: {
                 advisors: {
                     select: { id: true, firstName: true, lastName: true },
                 },
                 term: { select: { id: true, term: true, year: true } },
                 _count: {
-                    select: { students: true }, // นับจำนวนนักเรียนในห้องมาให้ด้วย
+                    select: {
+                        enrollments: {
+                            where: {
+                                OR: [
+                                    { status: EnrollmentStatus.ACTIVE },
+                                    {
+                                        status: EnrollmentStatus.ENDED,
+                                        exitReason: {
+                                            notIn: [
+                                                EnrollmentExitReason.TRANSFERRED,
+                                                EnrollmentExitReason.STUDY_LEAVE,
+                                            ],
+                                        },
+                                    },
+                                ],
+                            },
+                        },
+                    },
                 },
             },
         });
+
+        return classrooms.map(({ _count, ...classroom }) => ({
+            ...classroom,
+            _count: { students: _count.enrollments },
+        }));
     }
 
     async findOne(id: number) {
