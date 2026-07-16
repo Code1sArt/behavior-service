@@ -242,11 +242,21 @@ export class AttendanceService {
             },
             include: {
                 enrollments: {
-                    where: { termId: term!.id },
+                    where: {
+                        termId: term!.id,
+                        startedAt: { lte: endOfDay },
+                        OR: [
+                            { endedAt: null },
+                            { endedAt: { gt: endOfDay } },
+                        ],
+                    },
                     select: { studentId: true },
                 },
                 students: {
-                    where: { role: 'STUDENT' },
+                    where: {
+                        role: 'STUDENT',
+                        enrollments: { none: {} },
+                    },
                     select: { id: true },
                 },
             },
@@ -275,10 +285,10 @@ export class AttendanceService {
                     (attendance.classroomId ?? attendance.student.classroomId) ===
                     room.id,
             );
-            const rosterIds =
-                room.enrollments.length > 0
-                    ? room.enrollments.map((enrollment) => enrollment.studentId)
-                    : room.students.map((student) => student.id);
+            const rosterIds = [
+                ...room.enrollments.map((enrollment) => enrollment.studentId),
+                ...room.students.map((student) => student.id),
+            ];
             const totalStudents = new Set(rosterIds).size;
 
             const presentCount = roomAttendances.filter((a) => a.status === AttendanceStatus.PRESENT).length;
@@ -785,11 +795,21 @@ export class AttendanceService {
             include: {
                 advisors: { select: { firstName: true, lastName: true, lineUserId: true } },
                 enrollments: {
-                    where: { termId: term!.id },
+                    where: {
+                        termId: term!.id,
+                        startedAt: { lte: endOfDay },
+                        OR: [
+                            { endedAt: null },
+                            { endedAt: { gt: endOfDay } },
+                        ],
+                    },
                     select: { studentId: true },
                 },
                 students: {
-                    where: { role: 'STUDENT' },
+                    where: {
+                        role: 'STUDENT',
+                        enrollments: { none: {} },
+                    },
                     select: { id: true }, // ดึงแค่ ID มาก็พอเพื่อความรวดเร็ว
                 },
             },
@@ -815,10 +835,10 @@ export class AttendanceService {
 
         // 5. นำห้องเรียนมาเทียบกับข้อมูลการเช็คชื่อ
         const allDetails = classrooms.map(room => {
-            const studentIds =
-                room.enrollments.length > 0
-                    ? room.enrollments.map(enrollment => enrollment.studentId)
-                    : room.students.map(student => student.id);
+            const studentIds = [...new Set([
+                ...room.enrollments.map(enrollment => enrollment.studentId),
+                ...room.students.map(student => student.id),
+            ])];
             const studentCount = studentIds.length;
             const advisorName = room.advisors.length > 0
                 ? room.advisors.map(advisor => advisor.firstName).join(', ')

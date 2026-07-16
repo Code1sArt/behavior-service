@@ -1,6 +1,40 @@
 import { ClassroomsService } from './classrooms.service';
 
 describe('ClassroomsService historical identity guard', () => {
+  it('returns classroom student counts from eligible enrollments', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 10,
+        name: 'ม.1/1',
+        _count: { enrollments: 24 },
+      },
+    ]);
+    const service = new ClassroomsService({
+      classroom: { findMany },
+    } as never);
+
+    const result = await service.findAll();
+
+    expect(result[0]._count.students).toBe(24);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: {
+            select: {
+              enrollments: {
+                where: {
+                  OR: expect.arrayContaining([
+                    expect.objectContaining({ status: 'ACTIVE' }),
+                  ]),
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+  });
+
   it('rejects renaming a classroom that already has history', async () => {
     const prisma = {
       classroom: {

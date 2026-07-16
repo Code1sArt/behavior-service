@@ -1,5 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PointType, Role } from '@prisma/client';
+import {
+  EnrollmentExitReason,
+  EnrollmentStatus,
+  PointType,
+  Role,
+} from '@prisma/client';
 import {
   calculateLedgerScore,
   calculateLegacyScore,
@@ -32,6 +37,36 @@ type ClassroomThresholds = {
 @Injectable()
 export class SummaryService {
   constructor(private prisma: PrismaService) {}
+
+  private isSummaryEligibleEnrollment(enrollment: {
+    status: EnrollmentStatus;
+    exitReason: EnrollmentExitReason | null;
+  }) {
+    return (
+      enrollment.status === EnrollmentStatus.ACTIVE ||
+      (enrollment.status === EnrollmentStatus.ENDED &&
+        enrollment.exitReason !== EnrollmentExitReason.TRANSFERRED &&
+        enrollment.exitReason !== EnrollmentExitReason.STUDY_LEAVE)
+    );
+  }
+
+  private summaryEnrollmentWhere(termId?: number) {
+    return {
+      ...(termId !== undefined && { termId }),
+      OR: [
+        { status: EnrollmentStatus.ACTIVE },
+        {
+          status: EnrollmentStatus.ENDED,
+          exitReason: {
+            notIn: [
+              EnrollmentExitReason.TRANSFERRED,
+              EnrollmentExitReason.STUDY_LEAVE,
+            ],
+          },
+        },
+      ],
+    };
+  }
 
   private calculateCumulativeScore(
     student: ScoreStudent,
@@ -118,6 +153,7 @@ export class SummaryService {
       include: {
         term: true,
         enrollments: {
+          where: this.summaryEnrollmentWhere(),
           include: {
             student: {
               include: {
@@ -133,7 +169,10 @@ export class SummaryService {
           },
         },
         students: {
-          where: { role: Role.STUDENT },
+          where: {
+            role: Role.STUDENT,
+            enrollments: { none: {} },
+          },
           include: {
             pointAccount: true,
             behaviorLogs: {
@@ -149,10 +188,12 @@ export class SummaryService {
 
     if (!classroom) throw new NotFoundException('ไม่พบห้องเรียน');
 
-    const roster =
-      classroom.enrollments.length > 0
-        ? classroom.enrollments.map((enrollment) => enrollment.student)
-        : classroom.students;
+    const roster = [
+      ...classroom.enrollments
+        .filter((enrollment) => this.isSummaryEligibleEnrollment(enrollment))
+        .map((enrollment) => enrollment.student),
+      ...classroom.students,
+    ];
     const uniqueStudents = [
       ...new Map(roster.map((student) => [student.id, student])).values(),
     ];
@@ -217,7 +258,7 @@ export class SummaryService {
       include: {
         term: true,
         enrollments: {
-          where: { termId: selectedTermId },
+          where: this.summaryEnrollmentWhere(selectedTermId),
           include: {
             student: {
               include: {
@@ -233,7 +274,10 @@ export class SummaryService {
           },
         },
         students: {
-          where: { role: Role.STUDENT },
+          where: {
+            role: Role.STUDENT,
+            enrollments: { none: {} },
+          },
           include: {
             pointAccount: true,
             behaviorLogs: {
@@ -250,10 +294,12 @@ export class SummaryService {
     const result = this.emptySchoolWideSummary();
 
     for (const classroom of classrooms) {
-      const roster =
-        classroom.enrollments.length > 0
-          ? classroom.enrollments.map((enrollment) => enrollment.student)
-          : classroom.students;
+      const roster = [
+        ...classroom.enrollments
+          .filter((enrollment) => this.isSummaryEligibleEnrollment(enrollment))
+          .map((enrollment) => enrollment.student),
+        ...classroom.students,
+      ];
       const uniqueStudents = [
         ...new Map(roster.map((student) => [student.id, student])).values(),
       ];
