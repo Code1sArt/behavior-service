@@ -11,3 +11,8 @@ coverage/
 Archive.zip
 README.md
 docker-compose.yml
+
+# Keep server-only credentials outside the deploy root as well
+**/*service-account*.json
+**/*firebase-admin*.json
+.secrets/

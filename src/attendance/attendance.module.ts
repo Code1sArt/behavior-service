@@ -1,3 +1,4 @@
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
@@ -8,6 +9,11 @@ import { AcademicCalendarModule } from '../academic-calendar/academic-calendar.m
 @Module({
   providers: [AttendanceService],
   controllers: [AttendanceController],
-  imports: [PrismaModule, LineModule, AcademicCalendarModule],
+  imports: [
+    NotificationsModule,
+    PrismaModule,
+    LineModule,
+    AcademicCalendarModule,
+  ],
 })
-export class AttendanceModule { }
+export class AttendanceModule {}

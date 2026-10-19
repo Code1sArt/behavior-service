@@ -85,6 +85,9 @@ model User {
   password   String
   lineUserId String? @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
 
+  notificationDevices NotificationDevice[]
+  parentLinkInvitations ParentLinkInvitation[]
+
   // Relations
   classroom   Classroom? @relation("StudentClassroom", fields: [classroomId], references: [id])
   classroomId Int?
@@ -385,4 +388,55 @@ model BehaviorRecord {
 
   @@index([termId, classroomId, createdAt])
   @@index([studentId, createdAt])
+}
+
+
+// Native push registrations are independent of LINE account linking.
+model NotificationDevice {
+  id               String   @id @default(uuid())
+  tokenHash        String   @unique @db.Char(64)
+  token            String   @db.Text
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform         String   @db.VarChar(16)
+  revision         Int      @default(1)
+  sessionExpiresAt DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deliveries       PushDelivery[]
+  @@index([userId, sessionExpiresAt])
+}
+
+model PushDelivery {
+  id             String   @id @default(uuid())
+  eventId        String
+  kind           String   @db.VarChar(16)
+  deviceId       String
+  device         NotificationDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  userId         String
+  deviceRevision Int
+  status         String   @default("PENDING") @db.VarChar(16)
+  attempts       Int      @default(0)
+  nextAttemptAt  DateTime @default(now())
+  leaseUntil     DateTime?
+  claimId        String?
+  lastError      String?
+  sentAt         DateTime?
+  createdAt      DateTime @default(now())
+  @@unique([eventId, deviceId])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
+}
+
+model ParentLinkInvitation {
+  id String @id @default(uuid())
+  tokenHash String @unique @db.Char(64)
+  studentId String
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  parentCitizenId String
+  issuedBy String
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([studentId, expiresAt])
 }

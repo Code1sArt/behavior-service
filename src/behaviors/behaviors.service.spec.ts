@@ -20,10 +20,20 @@ describe('BehaviorsService write snapshots', () => {
       findMany: jest.fn(),
     },
   };
-  const service = new BehaviorsService(prisma as never, {} as never);
+  const notifications = {
+    enqueueStudent: jest.fn().mockResolvedValue(undefined),
+  };
+  const service = new BehaviorsService(
+    prisma as never,
+    {} as never,
+    notifications as never,
+  );
+
+  Object.assign(prisma, { $transaction: jest.fn(async (fn) => fn(prisma)) });
 
   beforeEach(() => {
     jest.clearAllMocks();
+    notifications.enqueueStudent.mockResolvedValue(undefined);
     createBehaviorArguments = undefined;
     prisma.pointCategory.findUnique.mockResolvedValue({
       id: 5,
@@ -53,6 +63,35 @@ describe('BehaviorsService write snapshots', () => {
       lineUserId: null,
       parent: null,
     });
+  });
+
+  it('queues behavior alerts inside the same write transaction', async () => {
+    await service.create('recorder-1', Role.AFFAIRS, {
+      studentId: 'student-1',
+      categoryId: 5,
+    });
+    expect(notifications.enqueueStudent).toHaveBeenCalledWith(
+      prisma,
+      'student-1',
+      'behavior',
+      expect.any(String),
+      10,
+    );
+  });
+
+  it('does not return success or send LINE when the outbox write fails', async () => {
+    notifications.enqueueStudent.mockRejectedValue(
+      new Error('outbox unavailable'),
+    );
+    const notify = jest.spyOn(service as any, 'notifyBehaviorRecorded');
+    await expect(
+      service.create('recorder-1', Role.TEACHER, {
+        studentId: 'student-1',
+        categoryId: 5,
+      }),
+    ).rejects.toThrow('outbox unavailable');
+    expect(notify).not.toHaveBeenCalled();
+    notify.mockRestore();
   });
 
   it('writes signed points, classroom, and term on a new record', async () => {

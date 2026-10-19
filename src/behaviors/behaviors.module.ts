@@ -1,3 +1,4 @@
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { BehaviorsController } from './behaviors.controller';
 import { BehaviorsService } from './behaviors.service';
@@ -7,6 +8,6 @@ import { LineModule } from 'src/line/line.module';
 @Module({
   controllers: [BehaviorsController],
   providers: [BehaviorsService],
-  imports: [PrismaModule, LineModule],
+  imports: [NotificationsModule, PrismaModule, LineModule],
 })
 export class BehaviorsModule {}
