@@ -59,3 +59,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Local database safety backups
 /backups
+
+# Firebase server-only credentials
+**/*service-account*.json
+**/*firebase-admin*.json

@@ -1,3 +1,5 @@
+import { LineIdentityService } from './line-identity.service';
+import { OptionalJwtGuard } from './guards/optional-jwt.guard';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -17,7 +19,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, LineIdentityService, OptionalJwtGuard],
+  exports: [LineIdentityService, OptionalJwtGuard],
   // exports: [AuthService], // Export AuthService เพื่อให้ Module อื่นๆ สามารถใช้ได้
 })
 export class AuthModule {}

@@ -6,20 +6,27 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+    }),
+  );
 
+  app.enableShutdownHooks();
   app.enableCors();
   // เปิดใช้งาน Validation ทั่วทั้งโปรเจกต์
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true, // จะตัด Field ที่ไม่ได้อยู่ใน DTO ทิ้งอัตโนมัติ
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true, // จะตัด Field ที่ไม่ได้อยู่ใน DTO ทิ้งอัตโนมัติ
+    }),
+  );
 
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Smart School API - Behavior Services')
-      .setDescription('คู่มือการใช้งาน API สำหรับระบบบันทึกคะแนนพฤติกรรมนักเรียน')
+      .setDescription(
+        'คู่มือการใช้งาน API สำหรับระบบบันทึกคะแนนพฤติกรรมนักเรียน',
+      )
       .setVersion('1.0')
       .addBearerAuth()
       .build();

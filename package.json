@@ -41,6 +41,7 @@
     "class-validator": "^0.15.1",
     "dayjs": "^1.11.20",
     "dotenv": "^17.4.2",
+    "firebase-admin": "14.5.0",
     "mariadb": "^3.5.2",
     "multer": "^2.1.1",
     "passport": "^0.7.0",
@@ -94,6 +95,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
+    }
   }
 }

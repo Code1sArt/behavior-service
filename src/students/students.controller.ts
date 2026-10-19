@@ -1,3 +1,4 @@
+import { StudentAccessService } from '../prisma/student-access.service';
 import {
   Controller,
   Get,
@@ -16,6 +17,7 @@ import {
   DefaultValuePipe,
   ParseIntPipe,
   BadRequestException,
+  Request,
 } from '@nestjs/common';
 import { StudentsService } from './students.service';
 import { CreateStudentDto } from './dto/create-student.dto';
@@ -37,22 +39,32 @@ import 'multer';
 
 @ApiTags('Students Management : การจัดการนักเรียน')
 @ApiBearerAuth()
-// @UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('students')
 export class StudentsController {
-  constructor(private readonly studentsService: StudentsService) {}
+  constructor(
+    private readonly studentsService: StudentsService,
+    private readonly access: StudentAccessService,
+  ) {}
 
   @Post()
   @Roles(Role.ADMIN, Role.TEACHER) // Admin และ Teacher เพิ่มได้
   @ApiOperation({ summary: 'เพิ่มนักเรียนใหม่ (Admin, Teacher)' })
-  create(@Body() createStudentDto: CreateStudentDto) {
+  async create(
+    @Body() createStudentDto: CreateStudentDto,
+    @Request() req: any,
+  ) {
+    await this.access.classroom(req.user, createStudentDto.classroomId);
     return this.studentsService.create(createStudentDto);
   }
 
   @Get()
-  // @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS)
+  @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS)
   @ApiOperation({ summary: 'ดูรายชื่อนักเรียนทั้งหมด' })
-  findAll(@Query('classroomId') classroomId?: string) {
+  async findAll(
+    @Request() req: any,
+    @Query('classroomId') classroomId?: string,
+  ) {
     if (classroomId === 'unassigned') {
       return this.studentsService.findAll(null);
     }
@@ -67,6 +79,7 @@ export class StudentsController {
   }
 
   @Get('search')
+  @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS)
   @ApiOperation({ summary: 'ค้นหานักเรียนด้วยรหัสนักเรียน ชื่อ หรือนามสกุล' })
   @ApiQuery({
     name: 'q',
@@ -90,7 +103,14 @@ export class StudentsController {
   @Patch(':id')
   @Roles(Role.ADMIN, Role.TEACHER) // Admin และ Teacher แก้ไขได้
   @ApiOperation({ summary: 'แก้ไขข้อมูลนักเรียน (Admin, Teacher)' })
-  update(@Param('id') id: string, @Body() updateStudentDto: UpdateStudentDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() updateStudentDto: UpdateStudentDto,
+    @Request() req: any,
+  ) {
+    await this.access.student(req.user, id);
+    if (updateStudentDto.classroomId !== undefined)
+      await this.access.classroom(req.user, updateStudentDto.classroomId);
     return this.studentsService.update(id, updateStudentDto);
   }
 
@@ -105,7 +125,7 @@ export class StudentsController {
   }
 
   @Post('upload')
-  @Roles(Role.ADMIN, Role.TEACHER) // อนุญาตทั้ง Admin และ ครู
+  @Roles(Role.ADMIN) // Bulk import is managed by school administrators
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({

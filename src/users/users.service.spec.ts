@@ -35,6 +35,25 @@ describe('UsersService', () => {
     service = module.get<UsersService>(UsersService);
   });
 
+  it.each([
+    { parentId: 'forged-parent' },
+    { classroomId: 2 },
+    { citizenId: 'forged-id' },
+    { lineUserId: 'forged-line' },
+  ])(
+    'prevents own profile from bypassing verified relationship fields: %o',
+    async (dto) => {
+      await expect(
+        service.updateUser(
+          'user-1',
+          { userId: 'user-1', role: Role.STUDENT },
+          dto,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    },
+  );
+
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
