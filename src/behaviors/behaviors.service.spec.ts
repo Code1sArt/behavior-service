@@ -37,6 +37,7 @@ describe('BehaviorsService write snapshots', () => {
     createBehaviorArguments = undefined;
     prisma.pointCategory.findUnique.mockResolvedValue({
       id: 5,
+      name: 'ทดสอบวินัย',
       type: PointType.DEDUCT,
       defaultPoints: 7,
       allowedForTeacher: true,
@@ -76,6 +77,7 @@ describe('BehaviorsService write snapshots', () => {
       'behavior',
       expect.any(String),
       10,
+      { title: 'หักคะแนน', body: 'หักคะแนน 7 คะแนน · ทดสอบวินัย' },
     );
   });
 

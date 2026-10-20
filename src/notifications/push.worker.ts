@@ -79,6 +79,9 @@ export class PushWorker implements OnModuleInit, OnModuleDestroy {
             device.token,
             job.kind as PushKind,
             job.eventId,
+            job.title && job.body
+              ? { title: job.title, body: job.body }
+              : undefined,
           );
           await this.prisma.pushDelivery.updateMany({
             where,

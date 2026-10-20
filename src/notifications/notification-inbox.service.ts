@@ -42,6 +42,8 @@ export class NotificationInboxService {
           id: true,
           eventId: true,
           kind: true,
+          title: true,
+          body: true,
           readAt: true,
           createdAt: true,
         },

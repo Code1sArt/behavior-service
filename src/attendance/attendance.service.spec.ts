@@ -1,8 +1,14 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { AttendanceStatus, AttendanceType, PointType, Role } from '@prisma/client';
+import {
+  AttendanceStatus,
+  AttendanceType,
+  PointType,
+  Role,
+} from '@prisma/client';
 import { AcademicCalendarService } from '../academic-calendar/academic-calendar.service';
 import { LineService } from '../line/line.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AttendanceService } from './attendance.service';
 
 describe('AttendanceService', () => {
@@ -37,10 +43,12 @@ describe('AttendanceService', () => {
   const academicCalendarService = {
     getSchoolDayStatus,
   } as unknown as AcademicCalendarService;
+  const enqueueStudent = jest.fn().mockResolvedValue(undefined);
   const service = new AttendanceService(
     prisma,
     lineService,
     academicCalendarService,
+    { enqueueStudent } as unknown as NotificationsService,
   );
   const dto = {
     type: AttendanceType.ASSEMBLY,
@@ -48,6 +56,7 @@ describe('AttendanceService', () => {
   };
 
   beforeEach(() => {
+    enqueueStudent.mockClear();
     findActiveTerm.mockReset();
     getSchoolDayStatus.mockReset();
     findClassrooms.mockReset();
@@ -100,72 +109,89 @@ describe('AttendanceService', () => {
 
   it('prevents a student from reading another student attendance history', async () => {
     await expect(
-      service.getStudentAttendance(
-        'student-2',
-        'student-1',
-        Role.STUDENT,
-      ),
+      service.getStudentAttendance('student-2', 'student-1', Role.STUDENT),
     ).rejects.toThrow(
       new ForbiddenException('นักเรียนดูประวัติการเช็คชื่อได้เฉพาะของตนเอง'),
     );
     expect(findAttendanceRecords).not.toHaveBeenCalled();
   });
 
-  it('writes classroom, term, and signed behavior points', async () => {
-    findActiveTerm.mockResolvedValue({ id: 1 });
-    getSchoolDayStatus.mockResolvedValue({
-      isSchoolDay: true,
-      reason: null,
-    });
-    findAttendanceRecords.mockResolvedValue([]);
-    findStudents.mockResolvedValue([
-      {
-        id: 'student-1',
-        firstName: 'สมชาย',
-        lastName: 'ใจดี',
-        lineUserId: null,
-        classroom: {
-          id: 10,
-          termId: 1,
-          startingPoints: 100,
-          term: {
-            isActive: true,
-            startDate: new Date('2026-05-01T00:00:00.000Z'),
-            endDate: new Date('2026-10-01T00:00:00.000Z'),
+  it.each(Object.values(AttendanceStatus))(
+    'queues clear attendance status %s inside the transaction',
+    async (status) => {
+      findActiveTerm.mockResolvedValue({ id: 1 });
+      getSchoolDayStatus.mockResolvedValue({
+        isSchoolDay: true,
+        reason: null,
+      });
+      findAttendanceRecords.mockResolvedValue([]);
+      findStudents.mockResolvedValue([
+        {
+          id: 'student-1',
+          firstName: 'สมชาย',
+          lastName: 'ใจดี',
+          lineUserId: null,
+          classroom: {
+            id: 10,
+            termId: 1,
+            startingPoints: 100,
+            term: {
+              isActive: true,
+              startDate: new Date('2026-05-01T00:00:00.000Z'),
+              endDate: new Date('2026-10-01T00:00:00.000Z'),
+            },
           },
         },
-      },
-    ]);
-    findPointCategory.mockResolvedValue({
-      defaultPoints: 2,
-      type: PointType.DEDUCT,
-    });
-    createAttendances.mockResolvedValue({ count: 1 });
-    createBehaviors.mockResolvedValue({ count: 1 });
+      ]);
+      findPointCategory.mockResolvedValue({
+        defaultPoints: 2,
+        type: PointType.DEDUCT,
+      });
+      createAttendances.mockResolvedValue({ count: 1 });
+      createBehaviors.mockResolvedValue({ count: 1 });
 
-    await service.recordBulk('recorder-1', {
-      type: AttendanceType.ASSEMBLY,
-      records: [{ studentId: 'student-1', status: AttendanceStatus.LATE }],
-    });
+      await service.recordBulk('recorder-1', {
+        type: AttendanceType.ASSEMBLY,
+        records: [{ studentId: 'student-1', status }],
+      });
 
-    expect(createAttendances).toHaveBeenCalledWith({
-      data: [
+      expect(enqueueStudent).toHaveBeenCalledWith(
+        expect.anything(),
+        'student-1',
+        'attendance',
+        expect.any(String),
+        undefined,
         expect.objectContaining({
-          classroomId: 10,
-          termId: 1,
+          title: expect.any(String),
+          body: expect.stringContaining('เช็คชื่อเข้าแถว'),
         }),
-      ],
-    });
-    expect(createBehaviors).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({
-          classroomId: 10,
-          termId: 1,
-          pointDelta: -2,
-        }),
-      ],
-    });
-  });
+      );
+      expect(createAttendances).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            classroomId: 10,
+            termId: 1,
+          }),
+        ],
+      });
+      if (
+        status === AttendanceStatus.LATE ||
+        status === AttendanceStatus.ABSENT
+      ) {
+        expect(createBehaviors).toHaveBeenCalledWith({
+          data: [
+            expect.objectContaining({
+              classroomId: 10,
+              termId: 1,
+              pointDelta: -2,
+            }),
+          ],
+        });
+      } else {
+        expect(createBehaviors).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it.each([AttendanceStatus.LATE, AttendanceStatus.ABSENT])(
     'does not auto-deduct points for AREA status %s',
