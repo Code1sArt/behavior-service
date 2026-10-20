@@ -6,12 +6,18 @@ import {
   initializeApp,
 } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import { NotificationContent } from './notification-content';
 import { PushKind } from './notifications.service';
 
 @Injectable()
 export class FirebasePushSender {
   private app?: App;
-  async send(token: string, kind: PushKind, eventId: string) {
+  async send(
+    token: string,
+    kind: PushKind,
+    eventId: string,
+    content?: NotificationContent,
+  ) {
     if (!this.app) {
       const projectId = process.env.FIREBASE_PROJECT_ID;
       if (projectId !== 'dsps-care')
@@ -26,12 +32,13 @@ export class FirebasePushSender {
           'dsps-care-push',
         );
     }
-    // Only generic text on the lock screen. Details are fetched through authenticated APIs.
+    // Snapshot the committed event text so retries keep the original meaning.
     return getMessaging(this.app).send({
       token,
       notification: {
-        title: 'DSPS Care',
-        body: 'มีข้อมูลใหม่จากโรงเรียน กรุณาเปิดแอปเพื่อตรวจสอบ',
+        title: content?.title ?? 'DSPS Care',
+        body:
+          content?.body ?? 'มีข้อมูลใหม่จากโรงเรียน กรุณาเปิดแอปเพื่อตรวจสอบ',
       },
       data: { kind, eventId },
       android: { priority: 'high', ttl: 60 * 60 * 1000 },

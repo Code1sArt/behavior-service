@@ -46,12 +46,30 @@ describe('push worker delivery lifecycle', () => {
     expect(prisma.pushDelivery.findMany).not.toHaveBeenCalled();
     expect(sender.send).not.toHaveBeenCalled();
   });
+  it('forwards the stored event snapshot to Firebase', async () => {
+    prisma.pushDelivery.findMany.mockResolvedValue([
+      {
+        ...job,
+        title: 'มาเรียน',
+        body: 'นักเรียน ทดสอบ · เช็คชื่อเข้าแถว · มาเรียน',
+      },
+    ]);
+    await worker.tick();
+    expect(sender.send).toHaveBeenCalledWith(
+      'private-token',
+      'behavior',
+      'event',
+      { title: 'มาเรียน', body: 'นักเรียน ทดสอบ · เช็คชื่อเข้าแถว · มาเรียน' },
+    );
+  });
+
   it('sends once after an atomic claim and records success', async () => {
     await worker.tick();
     expect(sender.send).toHaveBeenCalledWith(
       'private-token',
       'behavior',
       'event',
+      undefined,
     );
     expect(prisma.pushDelivery.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({

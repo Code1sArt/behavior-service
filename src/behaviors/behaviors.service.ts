@@ -1,3 +1,4 @@
+import { behaviorContent } from '../notifications/notification-content';
 import { NotificationsService } from '../notifications/notifications.service';
 import { randomUUID } from 'node:crypto';
 import {
@@ -149,6 +150,7 @@ export class BehaviorsService {
           (recorderRole === Role.ADMIN || recorderRole === Role.AFFAIRS)
           ? context.classroomId
           : undefined,
+        behaviorContent(category, category.defaultPoints),
       );
       return created;
     });
@@ -251,6 +253,7 @@ export class BehaviorsService {
             (recorderRole === Role.ADMIN || recorderRole === Role.AFFAIRS)
             ? contexts.get(studentId)!.classroomId
             : undefined,
+          behaviorContent(category, category.defaultPoints),
         );
       }
       return created;
@@ -292,6 +295,7 @@ export class BehaviorsService {
   async remove(id: string, requesterId: string, requesterRole: Role) {
     const record = await this.prisma.behaviorRecord.findUnique({
       where: { id },
+      include: { category: true },
     });
 
     if (!record) {
@@ -312,6 +316,13 @@ export class BehaviorsService {
         record.studentId,
         'behavior',
         randomUUID(),
+        undefined,
+        record.category
+          ? behaviorContent(record.category, record.points, true)
+          : {
+              title: 'ยกเลิกรายการคะแนน',
+              body: `ยกเลิกรายการคะแนนพฤติกรรม ${Math.abs(record.points)} คะแนน`,
+            },
       );
       return deleted;
     });

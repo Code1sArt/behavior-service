@@ -409,6 +409,8 @@ model NotificationDevice {
 }
 
 model PushDelivery {
+  title          String? @db.VarChar(191)
+  body           String? @db.Text
   id             String   @id @default(uuid())
   eventId        String
   kind           String   @db.VarChar(16)
@@ -443,6 +445,8 @@ model ParentLinkInvitation {
 }
 
 model NotificationInbox {
+  title String? @db.VarChar(191)
+  body String? @db.Text
   id String @id @default(uuid())
   userId String
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

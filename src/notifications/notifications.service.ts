@@ -1,3 +1,4 @@
+import { NotificationContent } from './notification-content';
 import { inboxEnabled } from './notification-inbox.service';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
@@ -57,13 +58,23 @@ export class NotificationsService {
     kind: PushKind,
     eventId: string,
     advisorClassroomId?: number,
+    content?: NotificationContent,
   ) {
     if (!pushEnabled() && !inboxEnabled()) return;
     const student = await tx.user.findUnique({
       where: { id: studentId },
-      select: { id: true, parentId: true },
+      select: { id: true, parentId: true, firstName: true, lastName: true },
     });
     if (!student) return;
+    const name = [student.firstName, student.lastName]
+      .filter(Boolean)
+      .join(' ');
+    const message = content
+      ? {
+          title: content.title,
+          body: `${name ? `${name} · ` : ''}${content.body}`,
+        }
+      : {};
     const recipientIds = new Set([
       student.id,
       ...(student.parentId ? [student.parentId] : []),
@@ -80,7 +91,12 @@ export class NotificationsService {
     }
     if (inboxEnabled()) {
       await tx.notificationInbox.createMany({
-        data: [...recipientIds].map((userId) => ({ userId, eventId, kind })),
+        data: [...recipientIds].map((userId) => ({
+          userId,
+          eventId,
+          kind,
+          ...message,
+        })),
         skipDuplicates: true,
       });
     }
@@ -101,6 +117,7 @@ export class NotificationsService {
         deviceId: device.id,
         userId: device.userId,
         deviceRevision: device.revision,
+        ...message,
       })),
       skipDuplicates: true,
     });

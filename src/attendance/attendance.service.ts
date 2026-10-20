@@ -1,3 +1,4 @@
+import { attendanceContent } from '../notifications/notification-content';
 import { NotificationsService } from '../notifications/notifications.service';
 import { randomUUID } from 'node:crypto';
 import {
@@ -497,17 +498,14 @@ export class AttendanceService {
       }
 
       for (const record of newRecords) {
-        if (
-          record.status === AttendanceStatus.LATE ||
-          record.status === AttendanceStatus.ABSENT
-        ) {
-          await this.notifications?.enqueueStudent(
-            tx,
-            record.studentId,
-            'attendance',
-            randomUUID(),
-          );
-        }
+        await this.notifications?.enqueueStudent(
+          tx,
+          record.studentId,
+          'attendance',
+          randomUUID(),
+          undefined,
+          attendanceContent(record.status, dto.type, todayThai.toDate()),
+        );
       }
 
       // 5. ส่ง LINE แจ้งเตือนสถานะขาด/มาสาย (AREA จะแจ้งโดยไม่ระบุว่าถูกหักคะแนน)
@@ -628,16 +626,19 @@ export class AttendanceService {
         });
       }
 
-      if (
-        dto.status !== existingRecord.status &&
-        (dto.status === AttendanceStatus.LATE ||
-          dto.status === AttendanceStatus.ABSENT)
-      ) {
+      if (dto.status !== existingRecord.status) {
         await this.notifications?.enqueueStudent(
           tx,
           existingRecord.studentId,
           'attendance',
           randomUUID(),
+          undefined,
+          attendanceContent(
+            dto.status,
+            existingRecord.type,
+            existingRecord.date,
+            true,
+          ),
         );
       }
       return tx.attendanceRecord.update({
@@ -779,16 +780,14 @@ export class AttendanceService {
         });
       }
 
-      if (
-        dto.status !== existingRecord?.status &&
-        (dto.status === AttendanceStatus.LATE ||
-          dto.status === AttendanceStatus.ABSENT)
-      ) {
+      if (dto.status !== existingRecord?.status) {
         await this.notifications?.enqueueStudent(
           tx,
           dto.studentId,
           'attendance',
           randomUUID(),
+          undefined,
+          attendanceContent(dto.status, dto.type, recordDate, !!existingRecord),
         );
       }
       if (existingRecord) {

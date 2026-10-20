@@ -19,6 +19,8 @@ describe('native push registration and transactional outbox', () => {
     process.env.PUSH_ENABLED = 'true';
     prisma.user.findUnique.mockResolvedValue({
       id: 'student',
+      firstName: 'นักเรียน',
+      lastName: 'ทดสอบ',
       parentId: 'parent',
     });
     prisma.user.findMany.mockResolvedValue([{ id: 'teacher' }]);
@@ -51,6 +53,32 @@ describe('native push registration and transactional outbox', () => {
     });
     expect(prisma.pushDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.notificationDevice.findMany).not.toHaveBeenCalled();
+  });
+
+  it('persists the same named event snapshot for inbox and every device', async () => {
+    process.env.IN_APP_NOTIFICATIONS_ENABLED = 'true';
+    await service.enqueueStudent(
+      prisma as never,
+      'student',
+      'behavior',
+      'detail-event',
+      undefined,
+      {
+        title: 'หักคะแนน',
+        body: 'หักคะแนน 3 คะแนน · แต่งกายผิดระเบียบ',
+      },
+    );
+    const content = {
+      title: 'หักคะแนน',
+      body: 'นักเรียน ทดสอบ · หักคะแนน 3 คะแนน · แต่งกายผิดระเบียบ',
+    };
+    expect(prisma.notificationInbox.createMany.mock.calls[0][0].data).toEqual([
+      expect.objectContaining({ userId: 'student', ...content }),
+      expect.objectContaining({ userId: 'parent', ...content }),
+    ]);
+    expect(prisma.pushDelivery.createMany.mock.calls[0][0].data).toEqual([
+      expect.objectContaining({ userId: 'parent', ...content }),
+    ]);
   });
 
   it('is disabled by default and writes no registrations or outbox', async () => {
