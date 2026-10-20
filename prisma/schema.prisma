@@ -86,6 +86,7 @@ model User {
   lineUserId String? @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
 
   notificationDevices NotificationDevice[]
+  notificationInbox NotificationInbox[]
   parentLinkInvitations ParentLinkInvitation[]
 
   // Relations
@@ -439,4 +440,17 @@ model ParentLinkInvitation {
   usedAt DateTime?
   createdAt DateTime @default(now())
   @@index([studentId, expiresAt])
+}
+
+model NotificationInbox {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId String
+  kind String @db.VarChar(16)
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([userId, eventId])
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt, id])
 }

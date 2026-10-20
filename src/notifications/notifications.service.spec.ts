@@ -8,6 +8,7 @@ const prisma = {
     findMany: jest.fn(),
   },
   pushDelivery: { createMany: jest.fn() },
+  notificationInbox: { createMany: jest.fn() },
   user: { findUnique: jest.fn(), findMany: jest.fn() },
 };
 const service = new NotificationsService(prisma as never);
@@ -26,10 +27,34 @@ describe('native push registration and transactional outbox', () => {
     ]);
   });
   afterEach(() => {
+    delete process.env.IN_APP_NOTIFICATIONS_ENABLED;
     delete process.env.PUSH_ENABLED;
   });
 
+  it('records inbox events without a registered device or native push enabled', async () => {
+    delete process.env.PUSH_ENABLED;
+    process.env.IN_APP_NOTIFICATIONS_ENABLED = 'true';
+    await service.enqueueStudent(
+      prisma as never,
+      'student',
+      'behavior',
+      'same-event',
+      1,
+    );
+    expect(prisma.notificationInbox.createMany).toHaveBeenCalledWith({
+      data: [
+        { userId: 'student', eventId: 'same-event', kind: 'behavior' },
+        { userId: 'parent', eventId: 'same-event', kind: 'behavior' },
+        { userId: 'teacher', eventId: 'same-event', kind: 'behavior' },
+      ],
+      skipDuplicates: true,
+    });
+    expect(prisma.pushDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.notificationDevice.findMany).not.toHaveBeenCalled();
+  });
+
   it('is disabled by default and writes no registrations or outbox', async () => {
+    delete process.env.IN_APP_NOTIFICATIONS_ENABLED;
     delete process.env.PUSH_ENABLED;
     await expect(
       service.register('user', new Date(Date.now() + 100000), {

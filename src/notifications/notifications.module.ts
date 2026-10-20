@@ -5,11 +5,18 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { FirebasePushSender } from './firebase-push.sender';
 import { PushWorker } from './push.worker';
+import { NotificationInboxService } from './notification-inbox.service';
+import { NotificationInboxController } from './notification-inbox.controller';
 
 @Module({
   imports: [PrismaModule, JwtModule.register({})],
-  controllers: [NotificationsController],
-  providers: [NotificationsService, FirebasePushSender, PushWorker],
+  controllers: [NotificationsController, NotificationInboxController],
+  providers: [
+    NotificationsService,
+    FirebasePushSender,
+    PushWorker,
+    NotificationInboxService,
+  ],
   exports: [NotificationsService],
 })
 export class NotificationsModule {}
