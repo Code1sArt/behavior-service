@@ -1,3 +1,4 @@
+import { inboxEnabled } from './notification-inbox.service';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
@@ -57,7 +58,7 @@ export class NotificationsService {
     eventId: string,
     advisorClassroomId?: number,
   ) {
-    if (!pushEnabled()) return;
+    if (!pushEnabled() && !inboxEnabled()) return;
     const student = await tx.user.findUnique({
       where: { id: studentId },
       select: { id: true, parentId: true },
@@ -77,6 +78,13 @@ export class NotificationsService {
       });
       advisors.forEach((user) => recipientIds.add(user.id));
     }
+    if (inboxEnabled()) {
+      await tx.notificationInbox.createMany({
+        data: [...recipientIds].map((userId) => ({ userId, eventId, kind })),
+        skipDuplicates: true,
+      });
+    }
+    if (!pushEnabled()) return;
     const devices = await tx.notificationDevice.findMany({
       where: {
         userId: { in: [...recipientIds] },
