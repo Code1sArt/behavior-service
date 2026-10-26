@@ -23,6 +23,7 @@ describe('AttendanceService', () => {
   const createBehaviors = jest.fn();
   const runTransaction = jest.fn((callback: (tx: unknown) => unknown) =>
     callback({
+      systemConfig: { upsert: jest.fn().mockResolvedValue({ value: 'OPEN' }) },
       attendanceRecord: { createMany: createAttendances },
       behaviorRecord: { createMany: createBehaviors },
     }),

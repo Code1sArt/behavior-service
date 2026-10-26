@@ -1,3 +1,4 @@
+import { lockAttendanceTerm } from './attendance-archive-state';
 import { attendanceContent } from '../notifications/notification-content';
 import { NotificationsService } from '../notifications/notifications.service';
 import { randomUUID } from 'node:crypto';
@@ -435,6 +436,7 @@ export class AttendanceService {
     ]);
 
     return this.prisma.$transaction(async (tx) => {
+      await lockAttendanceTerm(tx, activeTerm.id);
       // 3. บันทึกการเช็คชื่อ (เฉพาะคนที่ผ่านการกรองแล้ว)
       const attendanceData = newRecords.map((r) => {
         const context = studentContexts.get(r.studentId)!;
@@ -563,6 +565,7 @@ export class AttendanceService {
     ]);
 
     const updatedRecord = await this.prisma.$transaction(async (tx) => {
+      await lockAttendanceTerm(tx, existingRecord.termId);
       // ใช้ dayjs กำหนดขอบเขตของ "วันนั้น" ตามโซนเวลาไทย เพื่อลบคะแนนได้แม่นยำ
       const recordDate = dayjs(existingRecord.date).tz(this.TIMEZONE);
       const startOfDay = recordDate.startOf('day').toDate();
@@ -723,6 +726,7 @@ export class AttendanceService {
     const legacyNoteRef = `ระบบหักคะแนนอัตโนมัติจากการเช็คชื่อ: ${dto.type}`;
 
     const savedRecord = await this.prisma.$transaction(async (tx) => {
+      await lockAttendanceTerm(tx, term.id);
       if (
         existingRecord?.status === AttendanceStatus.LATE ||
         existingRecord?.status === AttendanceStatus.ABSENT
