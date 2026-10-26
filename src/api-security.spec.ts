@@ -1,3 +1,5 @@
+import { AttendanceArchiveController } from './attendance/attendance-archive.controller';
+import { AttendanceArchiveService } from './attendance/attendance-archive.service';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PassportModule } from '@nestjs/passport';
@@ -19,6 +21,11 @@ import { BehaviorsController } from './behaviors/behaviors.controller';
 import { BehaviorsService } from './behaviors/behaviors.service';
 import { PrismaService } from './prisma/prisma.service';
 import { StudentAccessService } from './prisma/student-access.service';
+
+const archives = {
+  exportSql: jest.fn(() => '-- SQL'),
+  purge: jest.fn(() => ({ deletedCount: 1 })),
+};
 
 const secret = 'isolated-http-test-secret';
 const jwt = new JwtService({ secret });
@@ -106,6 +113,7 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
         StudentsController,
         SummaryController,
         AttendanceController,
+        AttendanceArchiveController,
         BehaviorsController,
       ],
       providers: [
@@ -117,6 +125,7 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
         { provide: SummaryService, useValue: summary },
         { provide: AuthService, useValue: auth },
         { provide: AttendanceService, useValue: attendance },
+        { provide: AttendanceArchiveService, useValue: archives },
         { provide: BehaviorsService, useValue: behaviors },
       ],
     }).compile();
@@ -131,6 +140,8 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
   });
 
   it.each([
+    ['post', '/attendance/archive/purge'],
+    ['get', '/attendance/archive/export'],
     ['post', '/students'],
     ['patch', '/students/student'],
     ['post', '/students/upload'],
@@ -164,6 +175,43 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
       .set('Authorization', `Bearer ${token('parent')}`)
       .send({})
       .expect(403);
+  });
+  it.each(['teacher', 'affairs', 'parent', 'student'])(
+    'restricts archive export and purge to admin: %s',
+    async (id) => {
+      await request(app.getHttpServer())
+        .get('/attendance/archive/export')
+        .set('Authorization', `Bearer ${token(id)}`)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post('/attendance/archive/purge')
+        .set('Authorization', `Bearer ${token(id)}`)
+        .send({ receipt: 'x'.repeat(30) })
+        .expect(403);
+      expect(archives.exportSql).not.toHaveBeenCalled();
+      expect(archives.purge).not.toHaveBeenCalled();
+    },
+  );
+  it('allows admin export and validates purge input', async () => {
+    await request(app.getHttpServer())
+      .get('/attendance/archive/export?termId=1')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .expect(200)
+      .expect('Content-Type', /application\/sql/)
+      .expect('Cache-Control', 'no-store');
+    expect(archives.exportSql).toHaveBeenCalledWith(1);
+    await request(app.getHttpServer())
+      .post('/attendance/archive/purge')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .send({})
+      .expect(400);
+    expect(archives.purge).not.toHaveBeenCalled();
+    await request(app.getHttpServer())
+      .post('/attendance/archive/purge')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .send({ receipt: 'x'.repeat(30) })
+      .expect(201);
+    expect(archives.purge).toHaveBeenCalledWith('x'.repeat(30), 'admin');
   });
   it.each(['summary/student', 'behaviors/student'])(
     'allows own child and rejects another family: %s',
