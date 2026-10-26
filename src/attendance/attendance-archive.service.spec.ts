@@ -1,3 +1,5 @@
+import { gunzipSync } from 'node:zlib';
+import type { Readable } from 'node:stream';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -70,7 +72,24 @@ describe('attendance archive safety', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     rows = [record()];
-    findMany.mockImplementation(() => Promise.resolve(rows));
+    findMany.mockImplementation(
+      (args: {
+        take?: number;
+        cursor?: { id: string };
+        where?: { termId?: { in: number[] } };
+      }) => {
+        const selected = rows.filter(
+          (row) =>
+            !args.where?.termId || args.where.termId.in.includes(row.termId),
+        );
+        const offset = args.cursor
+          ? selected.findIndex((row) => row.id === args.cursor!.id) + 1
+          : 0;
+        return Promise.resolve(
+          args.take ? selected.slice(offset, offset + args.take) : selected,
+        );
+      },
+    );
     findTerms.mockResolvedValue([
       { id: 1, isActive: false, endDate: new Date('2020-01-01') },
     ]);
@@ -157,6 +176,68 @@ describe('attendance archive safety', () => {
       expect(deleteMany).not.toHaveBeenCalled();
     },
   );
+  const collectGzip = async (stream: Readable) => {
+    const buffers: Buffer[] = [];
+    for await (const chunk of stream) buffers.push(chunk as Buffer);
+    return gunzipSync(Buffer.concat(buffers)).toString();
+  };
+  const decodeV2 = (sql: string) =>
+    JSON.parse(
+      Buffer.from(
+        sql.trim().split('-- DSPS_ARCHIVE_V2_END ')[1],
+        'base64',
+      ).toString(),
+    ) as { receipt: string; count: number; chunks: number };
+
+  it('streams compressed SQL in bounded pages and checks the same pages before purge', async () => {
+    rows = Array.from({ length: 2001 }, (_, index) => ({
+      ...record(),
+      id: `record-${String(index).padStart(5, '0')}`,
+    }));
+    const sql = await collectGzip(await service.exportGzip(1));
+    const manifest = decodeV2(sql);
+    expect(manifest.count).toBe(2001);
+    expect(manifest.chunks).toBe(3);
+    expect(sql).not.toContain('-- DSPS_ARCHIVE_BEGIN'); // No duplicate base64 dataset.
+    expect(sql.match(/INSERT INTO/g)).toHaveLength(2001);
+    const calls = findMany.mock.calls as [
+      { take: number; cursor?: { id: string }; skip?: number },
+    ][];
+    expect(calls.map((call) => call[0].take)).toEqual([1000, 1000, 1000]);
+    expect(calls[1][0]).toMatchObject({
+      cursor: { id: 'record-00999' },
+      skip: 1,
+    });
+    deleteMany.mockResolvedValue({ count: 2001 });
+    await expect(
+      service.purge(manifest.receipt, 'admin'),
+    ).resolves.toMatchObject({ deletedCount: 2001, scoresPreserved: true });
+  });
+  it('rejects a stale v2 archive without deleting any attendance or scores', async () => {
+    const archive = decodeV2(await collectGzip(await service.exportGzip()));
+    rows[0].status = 'PRESENT';
+    await expect(service.purge(archive.receipt, 'admin')).rejects.toThrow(
+      ConflictException,
+    );
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+  it('does not generate a completed archive if a later database page fails', async () => {
+    rows = Array.from({ length: 1000 }, (_, index) => ({
+      ...record(),
+      id: `record-${index}`,
+    }));
+    const stream = await service.exportGzip();
+    findMany.mockRejectedValueOnce(new Error('database read interrupted'));
+    await expect(collectGzip(stream)).rejects.toThrow(
+      'database read interrupted',
+    );
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+  it('validates empty and invalid gzip exports before opening the HTTP stream', async () => {
+    await expect(service.exportGzip(0)).rejects.toThrow(BadRequestException);
+    rows = [];
+    await expect(service.exportGzip()).rejects.toThrow('ไม่มีประวัติ');
+  });
   it('rejects a forged receipt before starting a transaction', async () => {
     const { receipt } = decode(await service.exportSql());
     const [payload] = receipt.split('.');
