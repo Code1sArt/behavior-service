@@ -5,6 +5,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { Readable, pipeline } from 'node:stream';
+import { createGzip } from 'node:zlib';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -22,7 +24,14 @@ const archiveInclude = {
 } satisfies Prisma.AttendanceRecordInclude;
 
 type Snapshot = Awaited<ReturnType<AttendanceArchiveService['snapshot']>>;
-type Receipt = { version: 1; termIds: number[]; digest: string; count: number };
+const ARCHIVE_BATCH_SIZE = 1000;
+type BatchDigest = { count: number; digest: string };
+type Receipt = {
+  version: 1 | 2;
+  termIds: number[];
+  digest: string;
+  count: number;
+};
 
 @Injectable()
 export class AttendanceArchiveService {
@@ -59,7 +68,7 @@ export class AttendanceArchiveService {
         Buffer.from(payload, 'base64url').toString(),
       ) as Receipt;
       if (
-        data.version !== 1 ||
+        (data.version !== 1 && data.version !== 2) ||
         !Array.isArray(data.termIds) ||
         !data.termIds.length ||
         !data.termIds.every((id) => Number.isSafeInteger(id) && id > 0) ||
@@ -145,6 +154,97 @@ export class AttendanceArchiveService {
     return lines.join('\n');
   }
 
+  // Only one database page and one SQL batch are retained while compressing.
+  private async *pages(tx: Prisma.TransactionClient, termIds?: number[]) {
+    let cursor: string | undefined;
+    while (true) {
+      const records = await tx.attendanceRecord.findMany({
+        where: termIds ? { termId: { in: termIds } } : {},
+        include: archiveInclude,
+        orderBy: { id: 'asc' },
+        take: ARCHIVE_BATCH_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (!records.length) return;
+      yield records;
+      if (records.length < ARCHIVE_BATCH_SIZE) return;
+      cursor = records[records.length - 1].id;
+    }
+  }
+
+  private chunksDigest(chunks: BatchDigest[]) {
+    return createHash('sha256').update(JSON.stringify(chunks)).digest('hex');
+  }
+
+  async exportGzip(termId?: number) {
+    if (
+      termId !== undefined &&
+      (!Number.isSafeInteger(termId) || termId <= 0)
+    ) {
+      throw new BadRequestException('ภาคเรียนไม่ถูกต้อง');
+    }
+    this.secret(); // Fail before sending response headers if signing is unavailable.
+    const pages = this.pages(this.prisma, termId ? [termId] : undefined);
+    const first = await pages.next();
+    if (first.done)
+      throw new BadRequestException('ไม่มีประวัติเช็คชื่อให้ส่งออก');
+    const source = Readable.from(this.sqlV2(pages, first.value));
+    const gzip = createGzip();
+    // Propagate failures and cancellation in either direction, including DB reads.
+    pipeline(source, gzip, () => undefined);
+    return gzip;
+  }
+
+  private async *sqlV2(pages: AsyncGenerator<Snapshot>, first: Snapshot) {
+    const exportedAt = new Date().toISOString();
+    const chunks: BatchDigest[] = [];
+    const terms = new Map<number, Snapshot[number]['term']>();
+    let count = 0;
+    yield '-- DSPS CARE attendance archive v2 (MySQL / MariaDB, UTF-8)\n';
+    yield '-- Historical snapshots only. Does not modify live attendance or scores.\n';
+    yield 'SET NAMES utf8mb4;\n';
+    yield 'CREATE TABLE IF NOT EXISTS `DSPSAttendanceArchive_v1` (`id` VARCHAR(191) NOT NULL PRIMARY KEY, `recordJson` LONGTEXT NOT NULL) CHARACTER SET utf8mb4;\n';
+    yield 'START TRANSACTION;\n';
+    let records = first;
+    try {
+      while (true) {
+        const lines: string[] = [];
+        for (const record of records) {
+          terms.set(record.termId, record.term);
+          const id = Buffer.from(record.id).toString('hex');
+          const json = Buffer.from(JSON.stringify(record)).toString('hex');
+          lines.push(
+            `INSERT INTO \`DSPSAttendanceArchive_v1\` (\`id\`, \`recordJson\`) VALUES (CONVERT(X'${id}' USING utf8mb4), CONVERT(X'${json}' USING utf8mb4));`,
+          );
+        }
+        const chunk = { count: records.length, digest: this.digest(records) };
+        chunks.push(chunk);
+        count += records.length;
+        lines.push(`-- DSPS_ARCHIVE_BATCH ${chunk.count} ${chunk.digest}`);
+        yield lines.join('\n') + '\n';
+        const next = await pages.next();
+        if (next.done) break;
+        records = next.value;
+      }
+      const digest = this.chunksDigest(chunks);
+      const termIds = [...terms.keys()].sort((a, b) => a - b);
+      const manifest = {
+        format: 'dsps-attendance-archive',
+        version: 2,
+        exportedAt,
+        count,
+        digest,
+        receipt: this.receipt({ version: 2, termIds, digest, count }),
+        terms: termIds.map((id) => terms.get(id)!),
+        chunks: chunks.length,
+      };
+      yield 'COMMIT;\n';
+      yield `-- DSPS_ARCHIVE_V2_END ${Buffer.from(JSON.stringify(manifest)).toString('base64')}\n`;
+    } finally {
+      await pages.return(undefined);
+    }
+  }
+
   async purge(token: string, actorId: string) {
     const receipt = this.verify(token);
     const termIds = [...new Set(receipt.termIds)].sort((a, b) => a - b);
@@ -169,11 +269,25 @@ export class AttendanceArchiveService {
             'ล้างได้เฉพาะภาคเรียนที่สิ้นสุดแล้วและไม่ได้ตั้งเป็นภาคเรียนปัจจุบัน',
           );
         }
-        const records = await this.snapshot(tx, termIds);
-        if (
-          records.length !== receipt.count ||
-          this.digest(records) !== receipt.digest
-        ) {
+        let count: number;
+        let digest: string;
+        if (receipt.version === 1) {
+          const records = await this.snapshot(tx, termIds);
+          count = records.length;
+          digest = this.digest(records);
+        } else {
+          count = 0;
+          const chunks: BatchDigest[] = [];
+          for await (const records of this.pages(tx, termIds)) {
+            count += records.length;
+            chunks.push({
+              count: records.length,
+              digest: this.digest(records),
+            });
+          }
+          digest = this.chunksDigest(chunks);
+        }
+        if (count !== receipt.count || digest !== receipt.digest) {
           throw new ConflictException(
             'ข้อมูลเปลี่ยนแปลงหลังส่งออก กรุณาส่งออกและตรวจไฟล์สำรองใหม่ก่อนล้าง',
           );

@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+import { gzipSync } from 'node:zlib';
 import { AttendanceArchiveController } from './attendance/attendance-archive.controller';
 import { AttendanceArchiveService } from './attendance/attendance-archive.service';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -24,6 +26,7 @@ import { StudentAccessService } from './prisma/student-access.service';
 
 const archives = {
   exportSql: jest.fn(() => '-- SQL'),
+  exportGzip: jest.fn(() => Readable.from([gzipSync('-- SQL')])),
   purge: jest.fn(() => ({ deletedCount: 1 })),
 };
 
@@ -142,6 +145,7 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
   it.each([
     ['post', '/attendance/archive/purge'],
     ['get', '/attendance/archive/export'],
+    ['get', '/attendance/archive/export-gzip'],
     ['post', '/students'],
     ['patch', '/students/student'],
     ['post', '/students/upload'],
@@ -188,6 +192,11 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
         .set('Authorization', `Bearer ${token(id)}`)
         .send({ receipt: 'x'.repeat(30) })
         .expect(403);
+      await request(app.getHttpServer())
+        .get('/attendance/archive/export-gzip')
+        .set('Authorization', `Bearer ${token(id)}`)
+        .expect(403);
+      expect(archives.exportGzip).not.toHaveBeenCalled();
       expect(archives.exportSql).not.toHaveBeenCalled();
       expect(archives.purge).not.toHaveBeenCalled();
     },
@@ -200,6 +209,14 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
       .expect('Content-Type', /application\/sql/)
       .expect('Cache-Control', 'no-store');
     expect(archives.exportSql).toHaveBeenCalledWith(1);
+    await request(app.getHttpServer())
+      .get('/attendance/archive/export-gzip?termId=1')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .expect(200)
+      .expect('Content-Type', /application\/gzip/)
+      .expect('Content-Disposition', /\.sql\.gz/)
+      .expect('Cache-Control', 'no-store');
+    expect(archives.exportGzip).toHaveBeenCalledWith(1);
     await request(app.getHttpServer())
       .post('/attendance/archive/purge')
       .set('Authorization', `Bearer ${token('admin')}`)

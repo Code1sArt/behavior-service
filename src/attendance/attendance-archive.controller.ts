@@ -6,6 +6,7 @@ import {
   Post,
   Query,
   UseGuards,
+  StreamableFile,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -38,6 +39,21 @@ export class AttendanceArchiveController {
   exportSql(@Query('termId') termId?: string) {
     return this.archives.exportSql(
       termId === undefined ? undefined : Number(termId),
+    );
+  }
+
+  @Get('export-gzip')
+  @Header('Content-Type', 'application/gzip')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="dsps-attendance.sql.gz"',
+  )
+  @Header('Cache-Control', 'no-store')
+  async exportGzip(@Query('termId') termId?: string) {
+    return new StreamableFile(
+      await this.archives.exportGzip(
+        termId === undefined ? undefined : Number(termId),
+      ),
     );
   }
 
