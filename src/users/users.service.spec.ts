@@ -54,6 +54,37 @@ describe('UsersService', () => {
     },
   );
 
+  it.each([Role.STUDENT, Role.PARENT, Role.TEACHER, Role.AFFAIRS])(
+    'prevents %s changing their own name',
+    async (role) => {
+      for (const dto of [{ firstName: 'Changed' }, { lastName: 'Changed' }]) {
+        await expect(
+          service.updateUser('self', { userId: 'self', role }, dto),
+        ).rejects.toThrow(ForbiddenException);
+      }
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows an admin to correct a name for school administration', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'student',
+      role: Role.STUDENT,
+    });
+    prisma.user.update.mockResolvedValue({
+      id: 'student',
+      firstName: 'Corrected',
+      password: 'hidden',
+    });
+    const result = await service.updateUser(
+      'student',
+      { userId: 'admin', role: Role.ADMIN },
+      { firstName: 'Corrected' },
+    );
+    expect(result.user.firstName).toBe('Corrected');
+    expect(result.user).not.toHaveProperty('password');
+  });
+
   it('should be defined', () => {
     expect(service).toBeDefined();
   });

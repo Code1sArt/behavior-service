@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -42,6 +43,16 @@ export class NotificationInboxController {
   @Patch('read-event')
   readEvent(@Request() req: any, @Body() dto: ReadEventDto) {
     return this.service.readEvent(req.user.userId, dto.eventId);
+  }
+
+  @Delete('read-all')
+  removeAllRead(@Request() req: any, @Body() dto: ReadAllDto) {
+    return this.service.removeAllRead(req.user.userId, dto.until);
+  }
+
+  @Delete(':id')
+  removeRead(@Request() req: any, @Param('id') id: string) {
+    return this.service.removeRead(req.user.userId, id);
   }
 
   @Patch(':id/read')

@@ -48,6 +48,15 @@ export class UsersService {
         'กรุณาจัดการข้อมูลเชื่อมโยงผ่านโรงเรียนหรือขั้นตอนยืนยันบัญชี',
       );
 
+    if (
+      reqUser.role !== Role.ADMIN &&
+      (dto.firstName !== undefined || dto.lastName !== undefined)
+    ) {
+      throw new ForbiddenException(
+        'ไม่สามารถแก้ไขชื่อหรือนามสกุลด้วยตนเอง กรุณาติดต่อผู้ดูแลโรงเรียน',
+      );
+    }
+
     // 3. เช็คว่ามี User คนนี้อยู่ในฐานข้อมูลจริงๆ ไหม
     const existingUser = await this.prisma.user.findUnique({
       where: { id: targetId },

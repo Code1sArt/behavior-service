@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -82,6 +83,30 @@ export class NotificationInboxService {
       data: { readAt: new Date() },
     });
     return { read: true };
+  }
+
+  async removeRead(userId: string, id: string) {
+    this.ready();
+    const found = await this.prisma.notificationInbox.findFirst({
+      where: { id, userId },
+      select: { readAt: true },
+    });
+    if (!found) throw new NotFoundException();
+    if (!found.readAt)
+      throw new BadRequestException('ลบได้เฉพาะการแจ้งเตือนที่อ่านแล้ว');
+    const result = await this.prisma.notificationInbox.deleteMany({
+      where: { id, userId, readAt: { not: null } },
+    });
+    return { deletedCount: result.count };
+  }
+
+  async removeAllRead(userId: string, until: string) {
+    this.ready();
+    const cutoff = new Date(Math.min(new Date(until).getTime(), Date.now()));
+    const result = await this.prisma.notificationInbox.deleteMany({
+      where: { userId, readAt: { not: null }, createdAt: { lte: cutoff } },
+    });
+    return { deletedCount: result.count };
   }
 
   async readEvent(userId: string, eventId: string) {

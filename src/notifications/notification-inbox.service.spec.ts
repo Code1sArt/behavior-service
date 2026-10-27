@@ -21,7 +21,9 @@ const prisma = {
   },
   notificationInbox: {
     findFirst: jest.fn(async ({ where }) =>
-      where.id === 'mine' && where.userId === 'parent' ? { id: 'mine' } : null,
+      where.id === 'mine' && where.userId === 'parent'
+        ? { id: 'mine', readAt: null as Date | null }
+        : null,
     ),
     findMany: jest.fn(async () => [
       {
@@ -32,6 +34,7 @@ const prisma = {
         readAt: null,
       },
     ]),
+    deleteMany: jest.fn(async () => ({ count: 1 })),
     count: jest.fn(async () => 3),
     updateMany: jest.fn(async () => ({ count: 1 })),
   },
@@ -67,9 +70,60 @@ describe('notification inbox HTTP ownership and unread state', () => {
     ['get', '/notifications/inbox'],
     ['get', '/notifications/inbox/unread-count'],
     ['patch', '/notifications/inbox/mine/read'],
+    ['delete', '/notifications/inbox/mine'],
+    ['delete', '/notifications/inbox/read-all'],
   ])('requires JWT for %s %s', async (method, path) => {
     await request(app.getHttpServer())[method](path).expect(401);
   });
+  it('rejects deleting unread or foreign notifications', async () => {
+    await request(app.getHttpServer())
+      .delete('/notifications/inbox/mine')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .delete('/notifications/inbox/foreign')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .expect(404);
+    expect(prisma.notificationInbox.deleteMany).not.toHaveBeenCalled();
+  });
+  it('deletes only the authenticated owners read entry', async () => {
+    prisma.notificationInbox.findFirst.mockResolvedValueOnce({
+      id: 'mine',
+      readAt: new Date(),
+    });
+    await request(app.getHttpServer())
+      .delete('/notifications/inbox/mine')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .send({ userId: 'other' })
+      .expect(200);
+    expect(prisma.notificationInbox.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'mine', userId: 'parent', readAt: { not: null } },
+    });
+  });
+  it('bulk delete preserves unread messages and newer events', async () => {
+    const until = '2026-01-01T00:00:00.000Z';
+    await request(app.getHttpServer())
+      .delete('/notifications/inbox/read-all')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .send({ until, userId: 'other' })
+      .expect(200);
+    expect(prisma.notificationInbox.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'parent',
+        readAt: { not: null },
+        createdAt: { lte: new Date(until) },
+      },
+    });
+  });
+  it('rejects bulk deletion without a valid snapshot', async () => {
+    await request(app.getHttpServer())
+      .delete('/notifications/inbox/read-all')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .send({ until: 'invalid' })
+      .expect(400);
+    expect(prisma.notificationInbox.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('returns a true per-user unread count', async () => {
     const response = await request(app.getHttpServer())
       .get('/notifications/inbox/unread-count')
