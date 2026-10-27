@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDeviceDto } from './device.dto';
 
-export type PushKind = 'behavior' | 'attendance';
+export type PushKind = 'behavior' | 'attendance' | 'broadcast';
 export const pushEnabled = () => process.env.PUSH_ENABLED === 'true';
 
 @Injectable()
