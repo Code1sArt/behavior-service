@@ -69,6 +69,9 @@ export class AuthService {
       throw new UnauthorizedException('รหัสประจำตัว หรือ รหัสผ่านไม่ถูกต้อง');
     }
 
+    if (dto.role && dto.role !== user.role)
+      throw new UnauthorizedException('บทบาทไม่ตรงกับบัญชี');
+
     const payload = {
       sub: user.id,
       citizenId: user.citizenId,

@@ -8,6 +8,9 @@ import { AuthController } from './auth.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { StaffEmailOtpController } from './staff-email-otp.controller';
+import { StaffEmailOtpService } from './staff-email-otp.service';
+import { BrevoEmailService } from './brevo-email.service';
 
 @Module({
   imports: [
@@ -18,8 +21,15 @@ import { PrismaService } from 'src/prisma/prisma.service';
       signOptions: { expiresIn: '1d' }, // Token หมดอายุใน 1 วัน
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LineIdentityService, OptionalJwtGuard],
+  controllers: [AuthController, StaffEmailOtpController],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    LineIdentityService,
+    OptionalJwtGuard,
+    StaffEmailOtpService,
+    BrevoEmailService,
+  ],
   exports: [LineIdentityService, OptionalJwtGuard],
   // exports: [AuthService], // Export AuthService เพื่อให้ Module อื่นๆ สามารถใช้ได้
 })

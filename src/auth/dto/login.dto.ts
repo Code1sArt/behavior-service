@@ -1,7 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum } from 'class-validator';
+import { Role } from '@prisma/client';
 
 export class LoginDto {
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
+
   @IsString()
   @ApiProperty({
     description: 'รหัสประจำตัวประชาชนหรือรหัสนักเรียน',

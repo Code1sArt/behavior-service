@@ -77,16 +77,19 @@ enum EnrollmentChangeAction {
 // -------------------------------------------------------------
 
 model User {
-  id         String  @id @default(uuid())
-  citizenId  String  @unique // รหัสบัตรประชาชน หรือรหัสนักเรียน
-  firstName  String
-  lastName   String
-  role       Role
-  password   String
-  lineUserId String? @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
+  id              String          @id @default(uuid())
+  citizenId       String          @unique // รหัสบัตรประชาชน หรือรหัสนักเรียน
+  firstName       String
+  lastName        String
+  role            Role
+  password        String
+  lineUserId      String?         @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
+  email           String?         @unique @db.VarChar(254)
+  emailVerifiedAt DateTime?
+  staffEmailOtps  StaffEmailOtp[]
 
-  notificationDevices NotificationDevice[]
-  notificationInbox NotificationInbox[]
+  notificationDevices   NotificationDevice[]
+  notificationInbox     NotificationInbox[]
   parentLinkInvitations ParentLinkInvitation[]
 
   // Relations
@@ -116,6 +119,35 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Short-lived staff email challenges; no plaintext OTP is stored.
+model StaffEmailOtp {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email          String    @db.VarChar(254)
+  role           Role
+  purpose        String    @db.VarChar(16)
+  codeHash       String    @db.Char(64)
+  credentialHash String    @db.Char(64)
+  attempts       Int       @default(0)
+  sentAt         DateTime?
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@index([expiresAt])
+}
+
+model EmailOtpBucket {
+  key       String   @id @db.VarChar(160)
+  count     Int      @default(0)
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }
 
 // ตารางสำหรับเก็บการตั้งค่าระบบส่วนกลาง
@@ -390,7 +422,6 @@ model BehaviorRecord {
   @@index([termId, classroomId, createdAt])
   @@index([studentId, createdAt])
 }
-
 
 // Native push registrations are independent of LINE account linking.
 model NotificationDevice {
