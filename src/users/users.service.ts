@@ -124,8 +124,16 @@ export class UsersService {
       include: {
         // ดึงข้อมูลห้องเรียน (ถ้าเป็นนักเรียน)
         classroom: true,
-        // ดึงข้อมูลห้องที่ปรึกษา (ถ้าเป็นครูที่ปรึกษา)
-        advisingClasses: true,
+        // Classroom IDs change each term; historical advisory links remain for reports.
+        advisingClasses: {
+          where: { term: { isActive: true } },
+          include: {
+            term: {
+              select: { id: true, year: true, term: true, isActive: true },
+            },
+          },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        },
         // ดึงข้อมูลลูกๆ (ถ้าเป็นผู้ปกครอง)
         children: {
           select: {

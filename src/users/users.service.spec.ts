@@ -89,6 +89,37 @@ describe('UsersService', () => {
     expect(service).toBeDefined();
   });
 
+  it('loads only advisory classrooms in the active term for both attendance clients', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'teacher',
+      password: 'hidden',
+      advisingClasses: [{ id: 22, name: 'ม.4/1', termId: 2 }],
+    });
+
+    const result = await service.getMe('teacher');
+
+    expect(prisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'teacher' },
+        include: expect.objectContaining({
+          advisingClasses: {
+            where: { term: { isActive: true } },
+            include: {
+              term: {
+                select: { id: true, year: true, term: true, isActive: true },
+              },
+            },
+            orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          },
+        }),
+      }),
+    );
+    expect(result.advisingClasses).toEqual([
+      { id: 22, name: 'ม.4/1', termId: 2 },
+    ]);
+    expect(result).not.toHaveProperty('password');
+  });
+
   it('prevents a non-admin user from updating another user', async () => {
     await expect(
       service.updateUser(
