@@ -258,8 +258,9 @@ async function smoke() {
       ).toString('base64url');
       return `${header}.${payload}.${createHmac('sha256', process.env.JWT_SECRET).update(`${header}.${payload}`).digest('base64url')}`;
     };
-    const get = async (endpoint, id, expected = 200) => {
+    const get = async (endpoint, id, expected = 200, method = 'GET') => {
       const response = await fetch(`https://api.dspscare.com${endpoint}`, {
+        method,
         headers: id ? { Authorization: `Bearer ${sign(id)}` } : {},
         signal: AbortSignal.timeout(20000),
       });
@@ -267,7 +268,7 @@ async function smoke() {
         throw new Error(
           `Release check failed for ${endpoint}: HTTP ${response.status}`,
         );
-      return expected === 200 ? response.json() : null;
+      return expected === 200 || expected === 404 ? response.json() : null;
     };
     const [admin] = await connection.query(
       "SELECT id FROM User WHERE role = 'ADMIN' LIMIT 1",
@@ -299,8 +300,16 @@ async function smoke() {
     await get('/photography/bookings', student.id);
     await get('/photography/managers', student.id, 403);
     await get('/photography/metadata', null, 401);
+    // Server-generated booking IDs are UUIDs. This non-UUID probe can never
+    // match a real booking and verifies the DELETE handler without deleting data.
+    const missingBooking = `/photography/bookings/release-smoke-missing-${require('node:crypto').randomUUID()}`;
+    const missing = await get(missingBooking, admin.id, 404, 'DELETE');
+    if (missing.message !== 'ไม่พบรายการจอง')
+      throw new Error('Admin photography deletion route is unavailable');
+    await get(missingBooking, student.id, 403, 'DELETE');
+    await get(missingBooking, null, 401, 'DELETE');
     console.log(
-      'Production smoke checks passed: health, admin photography, student access boundaries, and anonymous rejection. No business data was changed.',
+      'Production smoke checks passed: health, admin photography, student access boundaries, admin-only deletion, and anonymous rejection. No business data was changed.',
     );
   } finally {
     await connection.end();

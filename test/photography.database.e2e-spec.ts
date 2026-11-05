@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { PassportModule } from '@nestjs/passport';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaClient, Role } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import request from 'supertest';
 import type { Server } from 'node:http';
@@ -79,6 +80,10 @@ describe('Photography HTTP workflow with real isolated MySQL transactions', () =
     get: (path: string) =>
       request(app.getHttpServer() as Server)
         .get(`/photography/${path}`)
+        .set('Authorization', `Bearer ${token(id)}`),
+    delete: (path: string) =>
+      request(app.getHttpServer() as Server)
+        .delete(`/photography/${path}`)
         .set('Authorization', `Bearer ${token(id)}`),
     post: (path: string, data: unknown) =>
       request(app.getHttpServer() as Server)
@@ -426,6 +431,136 @@ describe('Photography HTTP workflow with real isolated MySQL transactions', () =
     expect(
       await db.notificationInbox.count({ where: { userId: 'teacher' } }),
     ).toBe(1);
+  });
+  it.each(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'])(
+    'admin permanently deletes a %s booking, its resources and notifications only',
+    async (status) => {
+      const id = await create();
+      const other = await create();
+      if (status === 'APPROVED') {
+        await api('manager')
+          .post(`bookings/${id}/approve`, { studentIds: ['student'] })
+          .expect(201);
+        // Deletion remains available after the job has begun.
+        await db.photographyBookingSlot.updateMany({
+          where: { bookingId: id },
+          data: { startsAt: new Date('2020-01-01') },
+        });
+      } else if (status === 'REJECTED') {
+        await api('manager')
+          .post(`bookings/${id}/reject`, { note: 'ทีมไม่พร้อม' })
+          .expect(201);
+      } else if (status === 'CANCELLED') {
+        await api('teacher')
+          .post(`bookings/${id}/cancel`, { note: 'เลื่อนกิจกรรม' })
+          .expect(201);
+      }
+      for (const user of [
+        'teacher',
+        'other-teacher',
+        'manager',
+        'affairs',
+        'student',
+        'parent',
+      ]) {
+        await api(user).delete(`bookings/${id}`).expect(403);
+      }
+      await api('admin')
+        .delete(`bookings/${id}`)
+        .expect(200, { deleted: true, id });
+      await api('admin').get(`bookings/${id}`).expect(404);
+      await api('admin').delete(`bookings/${id}`).expect(404);
+      expect(
+        await db.photographyBookingSlot.count({ where: { bookingId: id } }),
+      ).toBe(0);
+      expect(
+        await db.photographyAssignment.count({ where: { bookingId: id } }),
+      ).toBe(0);
+      const eventId = { startsWith: `photography:${id}:` };
+      expect(await db.notificationInbox.count({ where: { eventId } })).toBe(0);
+      expect(await db.pushDelivery.count({ where: { eventId } })).toBe(0);
+      expect(
+        await db.photographyLineDelivery.count({ where: { eventId } }),
+      ).toBe(0);
+      await api('admin').get(`bookings/${other}`).expect(200);
+      expect(
+        await db.notificationInbox.count({
+          where: { eventId: { startsWith: `photography:${other}:` } },
+        }),
+      ).toBeGreaterThan(0);
+      if (status === 'APPROVED') {
+        await api('manager')
+          .post(`bookings/${other}/approve`, { studentIds: ['student'] })
+          .expect(201);
+      }
+    },
+  );
+  it('deleting an approved equipment booking releases stock and removes reservation rows', async () => {
+    const equipment = {
+      kind: 'EQUIPMENT',
+      photographerCount: 0,
+      equipment: [{ equipmentId: 'camera', quantity: 2 }],
+    };
+    const a = await create(equipment),
+      b = await create(equipment);
+    await api('manager')
+      .post(`bookings/${a}/approve`, { studentIds: [] })
+      .expect(201);
+    await api('manager')
+      .post(`bookings/${b}/approve`, { studentIds: [] })
+      .expect(409);
+    await api('admin').delete(`bookings/${a}`).expect(200);
+    expect(
+      await db.photographyBookingEquipment.count({ where: { bookingId: a } }),
+    ).toBe(0);
+    await api('manager')
+      .post(`bookings/${b}/approve`, { studentIds: [] })
+      .expect(201);
+  });
+  it('rolls back deletion and notification cleanup together if the final delete fails', async () => {
+    const id = await create();
+    // Inject a late error inside the real transaction, after notification cleanup.
+    const service = app.get(PrismaService);
+    const transaction = service.$transaction.bind(service) as (
+      action: (tx: Prisma.TransactionClient) => Promise<unknown>,
+      options?: unknown,
+    ) => Promise<unknown>;
+    const spy = jest.spyOn(service, '$transaction').mockImplementationOnce(
+      (action: unknown, options: unknown) =>
+        transaction(async (tx) => {
+          const proxy = new Proxy(tx, {
+            get(target, property) {
+              if (property === 'photographyBooking')
+                return {
+                  ...target.photographyBooking,
+                  delete: () => {
+                    throw new Error('injected delete failure');
+                  },
+                };
+              return Reflect.get(target, property) as unknown;
+            },
+          });
+          return (action as (db: Prisma.TransactionClient) => Promise<unknown>)(
+            proxy,
+          );
+        }, options) as never,
+    );
+    try {
+      await api('admin').delete(`bookings/${id}`).expect(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(
+      await db.photographyBooking.findUnique({ where: { id } }),
+    ).not.toBeNull();
+    expect(
+      await db.photographyBookingSlot.count({ where: { bookingId: id } }),
+    ).toBe(2);
+    expect(
+      await db.notificationInbox.count({
+        where: { eventId: { startsWith: `photography:${id}:` } },
+      }),
+    ).toBeGreaterThan(0);
   });
   it('an outbox write failure rolls back approval and assignment together', async () => {
     const id = await create();

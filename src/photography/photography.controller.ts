@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -107,6 +108,12 @@ export class PhotographyController {
     @Param('id') id: string,
   ) {
     return this.service.detail(req.user, id);
+  }
+  @Delete('bookings/:id') remove(
+    @Request() req: AuthRequest,
+    @Param('id') id: string,
+  ) {
+    return this.service.remove(req.user, id);
   }
   @Get('bookings/:id/availability') availability(
     @Request() req: AuthRequest,

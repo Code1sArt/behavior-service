@@ -68,7 +68,9 @@ export class PhotographyService {
     const canManage =
       user.role === Role.ADMIN ||
       (user.role === Role.TEACHER && !!user.photographyManager);
-    if ((management && !canManage) || (admin && user.role !== Role.ADMIN))
+    if (admin && user.role !== Role.ADMIN)
+      throw new ForbiddenException('เฉพาะผู้ดูแลระบบเท่านั้น');
+    if (management && !canManage)
       throw new ForbiddenException('เฉพาะผู้รับผิดชอบด้านการถ่ายภาพเท่านั้น');
     return {
       role: user.role,
@@ -621,6 +623,27 @@ export class PhotographyService {
         `${booking.activityName}\n${note.trim()}`,
       );
       return result;
+    });
+  }
+  remove(actor: Actor, id: string) {
+    return this.write(actor, false, true, async (tx) => {
+      const booking = await tx.photographyBooking.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!booking) throw new NotFoundException('ไม่พบรายการจอง');
+      const eventId = { startsWith: `photography:${id}:` };
+      await tx.photographyLineDelivery.deleteMany({ where: { eventId } });
+      await tx.pushDelivery.deleteMany({
+        where: { kind: 'photography', eventId },
+      });
+      await tx.notificationInbox.deleteMany({
+        where: { kind: 'photography', eventId },
+      });
+      // Slots, assignments and borrowed equipment are removed by FK cascades.
+      // Use the same mutex as approval so freed capacity is immediately reusable.
+      await tx.photographyBooking.delete({ where: { id } });
+      return { deleted: true, id };
     });
   }
   private async pending(tx: DB, id: string) {
