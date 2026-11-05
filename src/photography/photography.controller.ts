@@ -16,6 +16,7 @@ import {
   ApprovePhotographyBookingDto,
   CreatePhotographyBookingDto,
   PhotographyActiveDto,
+  PhotographyCalendarQuery,
   PhotographyDirectoryQuery,
   PhotographyEquipmentDto,
   PhotographyListQuery,
@@ -88,6 +89,12 @@ export class PhotographyController {
     @Query() query: PhotographyListQuery,
   ) {
     return this.service.list(req.user, query);
+  }
+  @Get('calendar') calendar(
+    @Request() req: AuthRequest,
+    @Query() query: PhotographyCalendarQuery,
+  ) {
+    return this.service.calendar(req.user, query);
   }
   @Post('bookings') create(
     @Request() req: AuthRequest,

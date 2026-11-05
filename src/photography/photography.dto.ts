@@ -12,6 +12,7 @@ import {
   IsString,
   Max,
   MaxLength,
+  Matches,
   Min,
   MinLength,
   ValidateNested,
@@ -81,4 +82,8 @@ export class PhotographyListQuery {
   status?: PhotographyBookingStatus;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100000) page: number =
     1;
+}
+export class PhotographyCalendarQuery {
+  @Matches(/^[1-9]\d{3}-(0[1-9]|1[0-2])$/)
+  month!: string;
 }

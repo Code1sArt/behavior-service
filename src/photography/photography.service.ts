@@ -18,6 +18,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import {
   ApprovePhotographyBookingDto,
   CreatePhotographyBookingDto,
+  PhotographyCalendarQuery,
   PhotographyListQuery,
 } from './photography.dto';
 import { bookingSlots, peakQuantity, TimeSlot } from './photography.policy';
@@ -300,6 +301,33 @@ export class PhotographyService {
       this.prisma.photographyBooking.count({ where }),
     ]);
     return { items, total, page, pageSize: 30 };
+  }
+  async calendar(actor: Actor, query: PhotographyCalendarQuery) {
+    const permissions = await this.access(this.prisma, actor);
+    if (!permissions.canBook)
+      throw new ForbiddenException(
+        'เฉพาะครูและบุคลากรเท่านั้นที่ดูปฏิทินการจองได้',
+      );
+    const startsAt = new Date(`${query.month}-01T00:00:00+07:00`);
+    const [year, month] = query.month.split('-').map(Number);
+    const endsAt = new Date(Date.UTC(year, month, 1) - 7 * 60 * 60 * 1000);
+    // Bangkok month boundaries; include slots spanning either boundary.
+    // Share occupancy only, without requester or activity details.
+    const slots = await this.prisma.photographyBookingSlot.findMany({
+      where: {
+        startsAt: { lt: endsAt },
+        endsAt: { gt: startsAt },
+        booking: { status: { in: ['PENDING', 'APPROVED'] } },
+      },
+      select: {
+        id: true,
+        startsAt: true,
+        endsAt: true,
+        booking: { select: { kind: true, status: true } },
+      },
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+    });
+    return slots.map(({ booking, ...slot }) => ({ ...slot, ...booking }));
   }
   async detail(actor: Actor, id: string) {
     const permissions = await this.access(this.prisma, actor);
