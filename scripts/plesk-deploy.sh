@@ -86,6 +86,11 @@ case "${DEPLOY_APP_MODE:-prepare}" in
 esac
 
 yarn build
+
+if [[ -n "${PHOTOGRAPHY_RELEASE_ID:-}" ]]; then
+  node scripts/photography-production.cjs enable-if-new "$PHOTOGRAPHY_RELEASE_ID"
+fi
+
 yarn install --frozen-lockfile --production=true --ignore-scripts
 
 mkdir -p tmp

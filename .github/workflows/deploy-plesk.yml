@@ -41,6 +41,18 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.operation != 'inspect'
     name: Test, build, and deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      restore-check:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: restore-verification-only
+          MARIADB_DATABASE: restore_check
+        ports:
+          - 33316:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
     env:
       PLESK_PORT: ${{ secrets.PLESK_PORT || '22' }}
       HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
@@ -74,6 +86,36 @@ jobs:
           chmod 600 ~/.ssh/plesk_deploy_key
           ssh-keyscan -p "$PLESK_PORT" "${{ secrets.PLESK_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Snapshot production before changing source or schema
+        run: |
+          ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && /opt/plesk/node/24/bin/node - backup '${GITHUB_RUN_ID}'" \
+            < scripts/photography-production.cjs
+
+      - name: Verify snapshot restoration in a disposable database
+        env:
+          MYSQL_PWD: restore-verification-only
+        run: |
+          set -euo pipefail
+          umask 077
+          SNAPSHOT_FILE="$RUNNER_TEMP/production-restore-check.sql.gz"
+          trap 'rm -f "$SNAPSHOT_FILE"' EXIT
+          ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && /opt/plesk/node/24/bin/node - export '${GITHUB_RUN_ID}'" \
+            < scripts/photography-production.cjs > "$SNAPSHOT_FILE"
+          gzip -t "$SNAPSHOT_FILE"
+          DB_CONTAINER="${{ job.services.restore-check.id }}"
+          gzip -dc "$SNAPSHOT_FILE" | docker exec -i -e MYSQL_PWD "$DB_CONTAINER" mariadb -uroot restore_check
+          docker exec -e MYSQL_PWD "$DB_CONTAINER" mariadb-check -uroot restore_check
+          docker exec -e MYSQL_PWD "$DB_CONTAINER" mariadb -uroot restore_check \
+            -e 'SELECT COUNT(*) AS restored_users FROM User; SELECT COUNT(*) AS applied_migrations FROM _prisma_migrations WHERE finished_at IS NOT NULL;'
+          ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && /opt/plesk/node/24/bin/node - verified '${GITHUB_RUN_ID}'" \
+            < scripts/photography-production.cjs
+
       - name: Upload source to Plesk
         run: |
           rsync -az --delete \
@@ -82,14 +124,32 @@ jobs:
             ./ "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}:${{ secrets.PLESK_DEPLOY_PATH }}/"
 
       - name: Run remote deploy
+        id: release
         run: |
           ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
             "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
-            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && bash scripts/plesk-deploy.sh"
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && PHOTOGRAPHY_RELEASE_ID='${GITHUB_RUN_ID}' bash scripts/plesk-deploy.sh"
 
       - name: Health check
+        id: health
         if: ${{ env.HEALTHCHECK_URL != '' }}
         run: |
           BASE_URL="${HEALTHCHECK_URL%/}"
           BASE_URL="${BASE_URL%/docs}"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 "$BASE_URL/health"
+
+      - name: Verify production photography permissions
+        id: smoke
+        run: |
+          ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && /opt/plesk/node/24/bin/node - smoke" \
+            < scripts/photography-production.cjs
+
+      - name: Restore previous API if release verification fails
+        if: failure() && (steps.release.outcome == 'failure' || steps.health.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        run: |
+          ssh -i ~/.ssh/plesk_deploy_key -p "$PLESK_PORT" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && /opt/plesk/node/24/bin/node - rollback '${GITHUB_RUN_ID}'" \
+            < scripts/photography-production.cjs

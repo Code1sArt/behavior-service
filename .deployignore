@@ -16,3 +16,7 @@ docker-compose.yml
 **/*service-account*.json
 **/*firebase-admin*.json
 .secrets/
+
+.tmp/
+.temp/
+backups/

@@ -1,7 +1,7 @@
 # ระบบจองช่างภาพ
 
 ระบบนี้เพิ่มตารางในฐานข้อมูลเดิมและอ้างอิง `User.id` เดิม ไม่สร้างบัญชีหรือรหัสผ่านซ้ำ
-การเพิ่มครั้งนี้เตรียม source code และ migration ไว้ ยังไม่เปิดใช้กับฐานข้อมูลจริงหรือ deploy
+API, Admin และ LINE Mini App ปล่อยแยกจาก Mobile App ได้ โดย Mobile App ต้อง build/release ของตนเองภายหลัง
 
 ## สิทธิ์และหน้าจอ
 
@@ -118,3 +118,13 @@ Admin เป็นผู้กำหนดผู้รับผิดชอบ�
 
 **Database test ล้างข้อมูลใน database ทดสอบที่ระบุทุกกรณี ห้ามใช้ฐานข้อมูลที่มีข้อมูลต้องเก็บ**
 ไม่มี worker ส่ง push/LINE จริงในชุดทดสอบ database
+
+## Production workflow
+
+GitHub Actions saves a consistent database snapshot, the compiled API, and the previous `.env` in a private directory outside the deploy root before uploading source or running migrations. It streams the snapshot over SSH to a disposable MariaDB 10.11 service, restores it, checks its tables, and removes the temporary file. Dumps are never uploaded as public artifacts or printed in logs.
+
+When the photography migration is new, the workflow checks initialization and enables `PHOTOGRAPHY_ENABLED` and the Mini App link before restarting. Existing notification channel settings are preserved. Later deployments preserve the existing photography enablement setting.
+
+Smoke checks read health, metadata, and booking lists and check Admin, student, and anonymous permissions. They do not create bookings or send messages. If release or smoke verification fails, the workflow restores the previous compiled API and environment while retaining additive migrations.
+
+The `inspect` workflow operation reads production status without deploying. Mobile App distribution remains separate.
