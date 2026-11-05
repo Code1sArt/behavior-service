@@ -77,16 +77,22 @@ enum EnrollmentChangeAction {
 // -------------------------------------------------------------
 
 model User {
-  id              String          @id @default(uuid())
-  citizenId       String          @unique // รหัสบัตรประชาชน หรือรหัสนักเรียน
-  firstName       String
-  lastName        String
-  role            Role
-  password        String
-  lineUserId      String?         @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
-  email           String?         @unique @db.VarChar(254)
-  emailVerifiedAt DateTime?
-  staffEmailOtps  StaffEmailOtp[]
+  id                        String                    @id @default(uuid())
+  citizenId                 String                    @unique // รหัสบัตรประชาชน หรือรหัสนักเรียน
+  firstName                 String
+  lastName                  String
+  role                      Role
+  password                  String
+  lineUserId                String?                   @unique // <--- เพิ่มตัวนี้เพื่อเก็บ ID ของ LINE
+  email                     String?                   @unique @db.VarChar(254)
+  emailVerifiedAt           DateTime?
+  staffEmailOtps            StaffEmailOtp[]
+  photographyManager        PhotographyManager?
+  photographer              Photographer?
+  photographyBookings       PhotographyBooking[]      @relation("PhotographyRequester")
+  photographyReviews        PhotographyBooking[]      @relation("PhotographyReviewer")
+  photographyAssignments    PhotographyAssignment[]
+  photographyLineDeliveries PhotographyLineDelivery[]
 
   notificationDevices   NotificationDevice[]
   notificationInbox     NotificationInbox[]
@@ -119,6 +125,129 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum PhotographyBookingKind {
+  PHOTOGRAPHERS
+  EQUIPMENT
+}
+
+enum PhotographyBookingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// One row serializes roster, inventory and booking changes across all API processes.
+model PhotographyMutex {
+  id       Int @id
+  revision Int @default(0)
+}
+
+model PhotographyManager {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model Photographer {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model PhotographyDepartment {
+  id       String               @id @default(uuid())
+  name     String               @unique @db.VarChar(191)
+  active   Boolean              @default(true)
+  bookings PhotographyBooking[]
+}
+
+model PhotographyEquipment {
+  id       String                        @id @default(uuid())
+  name     String                        @unique @db.VarChar(191)
+  quantity Int
+  active   Boolean                       @default(true)
+  items    PhotographyBookingEquipment[]
+}
+
+model PhotographyBooking {
+  id                String                        @id @default(uuid())
+  kind              PhotographyBookingKind
+  status            PhotographyBookingStatus      @default(PENDING)
+  activityName      String                        @db.VarChar(191)
+  location          String                        @db.VarChar(500)
+  photographerCount Int                           @default(0)
+  hasLunch          Boolean
+  requesterId       String
+  requester         User                          @relation("PhotographyRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  departmentId      String
+  department        PhotographyDepartment         @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  reviewerId        String?
+  reviewer          User?                         @relation("PhotographyReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewNote        String?                       @db.VarChar(1000)
+  reviewedAt        DateTime?
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+  slots             PhotographyBookingSlot[]
+  assignments       PhotographyAssignment[]
+  equipment         PhotographyBookingEquipment[]
+
+  @@index([requesterId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PhotographyBookingSlot {
+  id        String             @id @default(uuid())
+  bookingId String
+  booking   PhotographyBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  startsAt  DateTime           @db.DateTime(3)
+  endsAt    DateTime           @db.DateTime(3)
+
+  @@index([bookingId])
+  @@index([startsAt, endsAt])
+}
+
+model PhotographyAssignment {
+  bookingId String
+  booking   PhotographyBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  studentId String
+  student   User               @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@id([bookingId, studentId])
+  @@index([studentId])
+}
+
+model PhotographyBookingEquipment {
+  bookingId   String
+  booking     PhotographyBooking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  equipmentId String
+  equipment   PhotographyEquipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+  quantity    Int
+
+  @@id([bookingId, equipmentId])
+  @@index([equipmentId])
+}
+
+// Committed together with the booking; retry LINE failures without losing the assignment.
+model PhotographyLineDelivery {
+  id            String    @id @default(uuid())
+  eventId       String
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message       String    @db.Text
+  status        String    @default("PENDING") @db.VarChar(16)
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  leaseUntil    DateTime?
+  claimId       String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([eventId, userId])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
 }
 
 // Short-lived staff email challenges; no plaintext OTP is stored.

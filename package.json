@@ -22,7 +22,8 @@
     "test:promotion:e2e": "ts-node scripts/test-promotion-e2e.ts",
     "db:check:baseline": "ts-node scripts/check-production-baseline.ts",
     "db:backfill:student-history": "ts-node scripts/backfill-student-history.ts",
-    "db:verify:student-scores": "ts-node scripts/verify-student-scores.ts"
+    "db:verify:student-scores": "ts-node scripts/verify-student-scores.ts",
+    "test:photography:db": "jest --config ./test/photography-jest.json --runInBand"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.0",

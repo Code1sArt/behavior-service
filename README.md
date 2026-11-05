@@ -38,6 +38,9 @@ Student transfer, study leave, and return-to-study are documented in
 The staged production release checklist is documented in
 [docs/production-rollout.md](docs/production-rollout.md).
 
+Photography booking, roles, notifications, and staged enablement are documented in
+[docs/photography.md](docs/photography.md).
+
 ## Description
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.

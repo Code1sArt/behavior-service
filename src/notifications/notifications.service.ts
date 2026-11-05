@@ -6,12 +6,54 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDeviceDto } from './device.dto';
 
-export type PushKind = 'behavior' | 'attendance' | 'broadcast';
+export type PushKind = 'behavior' | 'attendance' | 'broadcast' | 'photography';
 export const pushEnabled = () => process.env.PUSH_ENABLED === 'true';
 
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async enqueueUsers(
+    tx: Prisma.TransactionClient,
+    userIds: string[],
+    kind: PushKind,
+    eventId: string,
+    content: NotificationContent,
+  ) {
+    const recipients = [...new Set(userIds)];
+    if (inboxEnabled()) {
+      await tx.notificationInbox.createMany({
+        data: recipients.map((userId) => ({
+          userId,
+          kind,
+          eventId,
+          ...content,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    if (!pushEnabled()) return;
+    const devices = await tx.notificationDevice.findMany({
+      where: {
+        userId: { in: recipients },
+        sessionExpiresAt: { gt: new Date() },
+      },
+      select: { id: true, userId: true, revision: true },
+    });
+    if (devices.length)
+      await tx.pushDelivery.createMany({
+        data: devices.map((device) => ({
+          userId: device.userId,
+          deviceId: device.id,
+          deviceRevision: device.revision,
+          kind,
+          eventId,
+          title: content.title,
+          body: Array.from(content.body).slice(0, 250).join(''),
+        })),
+        skipDuplicates: true,
+      });
+  }
 
   async register(
     userId: string,

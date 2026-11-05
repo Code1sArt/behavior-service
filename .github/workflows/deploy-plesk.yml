@@ -6,13 +6,39 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Production operation
+        type: choice
+        options: [deploy, inspect]
+        default: deploy
 
 concurrency:
   group: plesk-production
   cancel-in-progress: true
 
 jobs:
+  inspect:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'inspect'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          PLESK_SSH_KEY: ${{ secrets.PLESK_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PLESK_SSH_KEY" > ~/.ssh/plesk_deploy_key
+          chmod 600 ~/.ssh/plesk_deploy_key
+          ssh-keyscan -p "${{ secrets.PLESK_PORT || '22' }}" "${{ secrets.PLESK_HOST }}" >> ~/.ssh/known_hosts
+      - name: Inspect production without changing it
+        run: |
+          ssh -i ~/.ssh/plesk_deploy_key -p "${{ secrets.PLESK_PORT || '22' }}" \
+            "${{ secrets.PLESK_USER }}@${{ secrets.PLESK_HOST }}" \
+            "cd '${{ secrets.PLESK_DEPLOY_PATH }}' && /opt/plesk/node/24/bin/node - inspect" \
+            < scripts/photography-production.cjs
   deploy:
+    if: github.event_name != 'workflow_dispatch' || inputs.operation != 'inspect'
     name: Test, build, and deploy
     runs-on: ubuntu-latest
     env:
