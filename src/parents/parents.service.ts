@@ -43,7 +43,7 @@ export class ParentsService {
       data: {
         tokenHash: this.hashCode(invitationCode),
         studentId: student.id,
-        parentCitizenId: dto.parentCitizenId,
+        parentCitizenId: dto.parentCitizenId ?? null,
         issuedBy: actor.userId,
         expiresAt,
       },
@@ -67,11 +67,13 @@ export class ParentsService {
       where: {
         tokenHash: this.hashCode(code),
         studentId,
-        parentCitizenId,
+        // New school codes bind to the student; older parent-bound codes still
+        // require the original parent's citizen ID.
+        OR: [{ parentCitizenId: null }, { parentCitizenId }],
         usedAt: null,
         expiresAt: { gt: new Date() },
       },
-      data: { usedAt: new Date() },
+      data: { usedAt: new Date(), parentCitizenId },
     });
     if (claimed.count !== 1)
       throw new ForbiddenException(
