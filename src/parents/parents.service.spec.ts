@@ -21,7 +21,13 @@ describe('verified parent linking', () => {
     parentLinkInvitation: { create: jest.fn() },
   };
   const line = { verify: jest.fn() };
-  const service = new ParentsService(prisma as any, {} as any, line as any);
+  const classroomLinks = { validate: jest.fn(), attach: jest.fn() };
+  const service = new ParentsService(
+    prisma as any,
+    {} as any,
+    line as any,
+    classroomLinks as any,
+  );
   beforeEach(() => {
     jest.clearAllMocks();
     tx.user.findUnique.mockResolvedValue({
@@ -36,6 +42,41 @@ describe('verified parent linking', () => {
     });
     tx.user.updateMany.mockResolvedValue({ count: 1 });
     tx.parentLinkInvitation.updateMany.mockResolvedValue({ count: 1 });
+  });
+  it('registers one parent with multiple selected students in one transaction', async () => {
+    const students = [
+      { studentId: 'second', invitationCode: 'aB3xY' },
+      { studentId: 'third', invitationCode: 'xY7zQ' },
+    ];
+    const validated = [
+      { id: 'second', classroomId: 1 },
+      { id: 'third', classroomId: 2 },
+    ];
+    classroomLinks.validate.mockResolvedValue(validated);
+    await service.register({
+      ...dto,
+      studentCitizenId: undefined,
+      invitationCode: undefined,
+      students,
+    });
+    expect(classroomLinks.validate).toHaveBeenCalledWith(tx, students);
+    expect(tx.user.create).toHaveBeenCalledTimes(1);
+    expect(classroomLinks.attach).toHaveBeenCalledWith(
+      tx,
+      'new-parent',
+      validated,
+    );
+    expect(tx.parentLinkInvitation.updateMany).not.toHaveBeenCalled();
+  });
+  it('validates all room selections before creating an account', async () => {
+    classroomLinks.validate.mockRejectedValue(new Error('invalid room code'));
+    await expect(
+      service.register({
+        ...dto,
+        students: [{ studentId: 'other', invitationCode: 'aB3xY' }],
+      }),
+    ).rejects.toThrow('invalid room code');
+    expect(tx.user.create).not.toHaveBeenCalled();
   });
   it('requires school proof before querying or creating a public account', async () => {
     await expect(
@@ -88,6 +129,150 @@ describe('verified parent linking', () => {
       service.addChild('other-parent', { studentCitizenId: 's1' }, actor),
     ).rejects.toThrow();
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it('adds a second and third child from different rooms to the same existing account', async () => {
+    const parent = {
+      id: actor.userId,
+      role: Role.PARENT,
+      citizenId: dto.citizenId,
+      children: [{ id: 'first-child' }],
+    };
+    const children = [
+      { id: 'second-child', citizenId: 's2', classroom: { name: 'ม.1/1' } },
+      { id: 'third-child', citizenId: 's3', classroom: { name: 'ม.4/2' } },
+    ];
+
+    for (const child of children) {
+      tx.user.findUnique
+        .mockResolvedValueOnce(parent)
+        .mockResolvedValueOnce({ ...child, role: Role.STUDENT, parentId: null })
+        .mockResolvedValueOnce(child);
+      await expect(
+        service.addChild(
+          parent.id,
+          {
+            studentCitizenId: child.citizenId,
+            invitationCode: `code-for-${child.id}`,
+          },
+          actor,
+        ),
+      ).resolves.toEqual(child);
+    }
+
+    expect(tx.user.create).not.toHaveBeenCalled();
+    expect(tx.user.updateMany).toHaveBeenCalledTimes(2);
+    for (const [index, child] of children.entries()) {
+      expect(tx.user.updateMany).toHaveBeenNthCalledWith(index + 1, {
+        where: { id: child.id, role: Role.STUDENT, parentId: null },
+        data: { parentId: parent.id },
+      });
+      expect(tx.parentLinkInvitation.updateMany).toHaveBeenNthCalledWith(
+        index + 1,
+        expect.objectContaining({
+          where: expect.objectContaining({ studentId: child.id, usedAt: null }),
+          data: { usedAt: expect.any(Date), parentCitizenId: parent.citizenId },
+        }),
+      );
+    }
+    const claims = tx.parentLinkInvitation.updateMany.mock.calls;
+    expect(claims[0][0].where.tokenHash).not.toBe(claims[1][0].where.tokenHash);
+  });
+  it("requires the next child's code even when the parent already has children", async () => {
+    tx.user.findUnique
+      .mockResolvedValueOnce({
+        id: actor.userId,
+        role: Role.PARENT,
+        citizenId: dto.citizenId,
+      })
+      .mockResolvedValueOnce({
+        id: 'second-child',
+        role: Role.STUDENT,
+        parentId: null,
+      });
+    await expect(
+      service.addChild(actor.userId, { studentCitizenId: 's2' }, actor),
+    ).rejects.toThrow('รหัสเชื่อมโยง');
+    expect(tx.parentLinkInvitation.updateMany).not.toHaveBeenCalled();
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+  });
+  it('rejects a code for another child, an expired code or a reused code without changing any links', async () => {
+    tx.user.findUnique
+      .mockResolvedValueOnce({
+        id: actor.userId,
+        role: Role.PARENT,
+        citizenId: dto.citizenId,
+      })
+      .mockResolvedValueOnce({
+        id: 'second-child',
+        role: Role.STUDENT,
+        parentId: null,
+      });
+    tx.parentLinkInvitation.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      service.addChild(
+        actor.userId,
+        { studentCitizenId: 's2', invitationCode: 'code-for-first-child' },
+        actor,
+      ),
+    ).rejects.toThrow('หมดอายุ');
+    expect(tx.parentLinkInvitation.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          studentId: 'second-child',
+          usedAt: null,
+          expiresAt: { gt: expect.any(Date) },
+        }),
+      }),
+    );
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+    expect(tx.user.create).not.toHaveBeenCalled();
+  });
+  it('rejects adding a child who is already linked without claiming another code', async () => {
+    tx.user.findUnique
+      .mockResolvedValueOnce({
+        id: actor.userId,
+        role: Role.PARENT,
+        citizenId: dto.citizenId,
+      })
+      .mockResolvedValueOnce({
+        id: 'second-child',
+        role: Role.STUDENT,
+        parentId: 'another-parent',
+      });
+    await expect(
+      service.addChild(
+        actor.userId,
+        { studentCitizenId: 's2', invitationCode: 'second-code' },
+        actor,
+      ),
+    ).rejects.toThrow('ไม่สามารถเชื่อมโยง');
+    expect(tx.parentLinkInvitation.updateMany).not.toHaveBeenCalled();
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+  });
+  it('lets an admin add the next child to an existing account without creating a duplicate account', async () => {
+    tx.user.findUnique
+      .mockResolvedValueOnce({
+        id: actor.userId,
+        role: Role.PARENT,
+        citizenId: dto.citizenId,
+      })
+      .mockResolvedValueOnce({
+        id: 'second-child',
+        role: Role.STUDENT,
+        parentId: null,
+      })
+      .mockResolvedValueOnce({ firstName: 'Second', lastName: 'Child' });
+    await service.addChild(
+      actor.userId,
+      { studentCitizenId: 's2' },
+      { userId: 'admin', role: Role.ADMIN },
+    );
+    expect(tx.parentLinkInvitation.updateMany).not.toHaveBeenCalled();
+    expect(tx.user.create).not.toHaveBeenCalled();
+    expect(tx.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'second-child', role: Role.STUDENT, parentId: null },
+      data: { parentId: actor.userId },
+    });
   });
   it('uses verified LINE identity rather than trusting a supplied ID', async () => {
     line.verify.mockRejectedValue(new Error('invalid LINE token'));

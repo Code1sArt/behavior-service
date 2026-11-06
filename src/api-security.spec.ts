@@ -53,6 +53,7 @@ const users = {
 const token = (id: string, role?: Role) =>
   jwt.sign({ sub: id, role: role ?? users[id]?.role }, { expiresIn: '1h' });
 const prisma = {
+  emailOtpBucket: { upsert: jest.fn(async () => ({ count: 1 })) },
   user: {
     findUnique: jest.fn(async ({ where }) => users[where.id] ?? null),
     findFirst: jest.fn(async ({ where }) => {
@@ -72,6 +73,13 @@ const prisma = {
   },
 };
 const parents = {
+  issueClassroomInvitation: jest.fn(() => ({ invitationCode: 'aB3xY' })),
+  resolveClassroomInvitation: jest.fn(() => ({
+    classroom: { id: 1, name: 'ม.1/1' },
+    students: [],
+  })),
+  addChildren: jest.fn(() => ({})),
+  removeChild: jest.fn(() => ({})),
   register: jest.fn(() => ({})),
   addChild: jest.fn(() => ({})),
   findAll: jest.fn(() => []),
@@ -135,6 +143,82 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
     app = module.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+  });
+  it('resolves a five-character classroom code publicly and rejects malformed codes', async () => {
+    await request(app.getHttpServer())
+      .post('/parents/classroom-invitations/resolve')
+      .send({ invitationCode: 'aB3xY' })
+      .expect(201);
+    expect(parents.resolveClassroomInvitation).toHaveBeenCalledWith('aB3xY');
+    await request(app.getHttpServer())
+      .post('/parents/classroom-invitations/resolve')
+      .send({ invitationCode: 'TOO-LONG' })
+      .expect(400);
+    expect(parents.resolveClassroomInvitation).toHaveBeenCalledTimes(1);
+  });
+  it('limits room-code lookups before listing students', async () => {
+    prisma.emailOtpBucket.upsert.mockResolvedValueOnce({ count: 121 });
+    await request(app.getHttpServer())
+      .post('/parents/classroom-invitations/resolve')
+      .send({ invitationCode: 'aB3xY' })
+      .expect(429);
+    expect(parents.resolveClassroomInvitation).not.toHaveBeenCalled();
+  });
+  it('restricts shared classroom code issuance to school staff', async () => {
+    await request(app.getHttpServer())
+      .post('/parents/classroom-invitations')
+      .send({ classroomId: 1 })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/parents/classroom-invitations')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .send({ classroomId: 1 })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/parents/classroom-invitations')
+      .set('Authorization', `Bearer ${token('affairs')}`)
+      .send({ classroomId: 1 })
+      .expect(201);
+    expect(parents.issueClassroomInvitation).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ userId: 'affairs' }),
+    );
+  });
+  it('validates each selected student and sends the authenticated parent to add/remove operations', async () => {
+    const students = [
+      { studentId: 's1', invitationCode: 'aB3xY' },
+      { studentId: 's2', invitationCode: 'aB3xY' },
+    ];
+    await request(app.getHttpServer())
+      .patch('/parents/children')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .send({ students, parentId: 'forged' })
+      .expect(200);
+    expect(parents.addChildren).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'parent', role: Role.PARENT }),
+      students,
+    );
+    await request(app.getHttpServer())
+      .patch('/parents/children')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .send({ students: [{ studentId: 's1' }] })
+      .expect(400);
+    await request(app.getHttpServer())
+      .delete('/parents/children/s1')
+      .set('Authorization', `Bearer ${token('parent')}`)
+      .expect(200);
+    expect(parents.removeChild).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'parent' }),
+      's1',
+    );
+    await request(app.getHttpServer())
+      .delete('/parents/children/s1')
+      .set('Authorization', `Bearer ${token('student')}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch('/parents/children')
+      .send({ students })
+      .expect(401);
   });
   beforeEach(() => jest.clearAllMocks());
   afterAll(async () => {

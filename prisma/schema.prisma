@@ -335,6 +335,7 @@ model Classroom {
   advisors User[] @relation("ClassroomAdvisors")
 
   students User[] @relation("StudentClassroom")
+  parentInvitation ParentClassroomInvitation?
 
   enrollments       StudentEnrollment[]
   attendanceRecords AttendanceRecord[]
@@ -589,6 +590,16 @@ model PushDelivery {
   @@unique([eventId, deviceId])
   @@index([status, nextAttemptAt])
   @@index([status, leaseUntil])
+}
+
+model ParentClassroomInvitation {
+  id          String    @id @default(uuid())
+  classroomId Int       @unique
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique @db.Char(64)
+  issuedBy    String
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
 }
 
 model ParentLinkInvitation {

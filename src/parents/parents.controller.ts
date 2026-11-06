@@ -24,11 +24,50 @@ import { Role } from '@prisma/client';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { AddChildDto } from './dto/add-child.dto';
+import {
+  AddChildrenDto,
+  CreateClassroomInvitationDto,
+  ResolveClassroomInvitationDto,
+} from './dto/classroom-invitation.dto';
+import { ParentInvitationThrottleGuard } from './parent-invitation-throttle.guard';
 
 @ApiTags('Parents Management')
 @Controller('parents')
 export class ParentsController {
   constructor(private readonly parentsService: ParentsService) {}
+
+  @Post('classroom-invitations')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.ADMIN, Role.AFFAIRS)
+  issueClassroomInvitation(
+    @Body() dto: CreateClassroomInvitationDto,
+    @Request() req: any,
+  ) {
+    return this.parentsService.issueClassroomInvitation(
+      dto.classroomId,
+      req.user,
+    );
+  }
+
+  @Post('classroom-invitations/resolve')
+  @UseGuards(ParentInvitationThrottleGuard)
+  resolveClassroomInvitation(@Body() dto: ResolveClassroomInvitationDto) {
+    return this.parentsService.resolveClassroomInvitation(dto.invitationCode);
+  }
+
+  @Patch('children')
+  @UseGuards(AuthGuard('jwt'), RolesGuard, ParentInvitationThrottleGuard)
+  @Roles(Role.PARENT)
+  addChildren(@Body() dto: AddChildrenDto, @Request() req: any) {
+    return this.parentsService.addChildren(req.user, dto.students);
+  }
+
+  @Delete('children/:studentId')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.PARENT)
+  removeChild(@Param('studentId') studentId: string, @Request() req: any) {
+    return this.parentsService.removeChild(req.user, studentId);
+  }
 
   @Post('link-invitations')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -39,7 +78,7 @@ export class ParentsController {
 
   // Public signup requires a school invitation; an authenticated ADMIN may provision directly.
   @Post('register')
-  @UseGuards(OptionalJwtGuard)
+  @UseGuards(OptionalJwtGuard, ParentInvitationThrottleGuard)
   @ApiOperation({ summary: 'ลงทะเบียนผู้ปกครองใหม่ (รองรับ LINE Mini App)' })
   @ApiResponse({
     status: 201,
@@ -56,7 +95,7 @@ export class ParentsController {
 
   @Patch('add-child')
   @ApiBearerAuth()
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(AuthGuard('jwt'), RolesGuard, ParentInvitationThrottleGuard)
   @Roles(Role.PARENT, Role.ADMIN) // เฉพาะผู้ปกครองเท่านั้นที่กดเพิ่มลูกเองได้
   @ApiOperation({
     summary: 'เพิ่มบุตรหลานในปกครอง (สำหรับผู้ปกครองที่ Login แล้ว)',
