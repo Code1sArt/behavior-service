@@ -596,7 +596,7 @@ model ParentLinkInvitation {
   tokenHash String @unique @db.Char(64)
   studentId String
   student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  parentCitizenId String
+  parentCitizenId String?
   issuedBy String
   expiresAt DateTime
   usedAt DateTime?

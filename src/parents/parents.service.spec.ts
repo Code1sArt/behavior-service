@@ -49,16 +49,17 @@ describe('verified parent linking', () => {
     expect(tx.user.create).not.toHaveBeenCalled();
     expect(tx.user.updateMany).not.toHaveBeenCalled();
   });
-  it('binds proof to student + parent ID and consumes it in the same transaction', async () => {
+  it('claims student-specific codes atomically and retains legacy parent binding', async () => {
     const result = await service.register(dto);
     expect(tx.parentLinkInvitation.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           studentId: 'student',
-          parentCitizenId: dto.citizenId,
+          OR: [{ parentCitizenId: null }, { parentCitizenId: dto.citizenId }],
           usedAt: null,
           expiresAt: { gt: expect.any(Date) },
         }),
+        data: { usedAt: expect.any(Date), parentCitizenId: dto.citizenId },
       }),
     );
     expect(tx.user.updateMany).toHaveBeenCalledWith({
@@ -115,6 +116,43 @@ describe('verified parent linking', () => {
     expect(data.tokenHash).toHaveLength(64);
     expect(data.parentCitizenId).toBe(dto.citizenId);
     expect(data).not.toHaveProperty('invitationCode');
+  });
+  it('issues student-specific codes without asking staff for a parent ID', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'student',
+      role: Role.STUDENT,
+      parentId: null,
+    });
+    const before = Date.now();
+    const result = await service.issueInvitation(
+      { studentCitizenId: 's1' },
+      { userId: 'staff', role: Role.AFFAIRS },
+    );
+    const data = prisma.parentLinkInvitation.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      studentId: 'student',
+      parentCitizenId: null,
+      issuedBy: 'staff',
+    });
+    expect(data.tokenHash).toHaveLength(64);
+    expect(data.tokenHash).not.toBe(result.invitationCode);
+    const expiresAt = result.expiresAt.getTime();
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 24 * 60 * 60 * 1000);
+    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60 * 1000);
+  });
+  it('still refuses to issue a code for a student with an existing parent', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'student',
+      role: Role.STUDENT,
+      parentId: 'existing-parent',
+    });
+    await expect(
+      service.issueInvitation(
+        { studentCitizenId: 's1' },
+        { userId: 'admin', role: Role.ADMIN },
+      ),
+    ).rejects.toThrow('มีผู้ปกครองแล้ว');
+    expect(prisma.parentLinkInvitation.create).not.toHaveBeenCalled();
   });
   it('does not let a family account issue its own school proof', async () => {
     await expect(

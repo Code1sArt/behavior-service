@@ -41,6 +41,9 @@ The staged production release checklist is documented in
 Photography booking, roles, notifications, and staged enablement are documented in
 [docs/photography.md](docs/photography.md).
 
+Student-specific parent link codes and their migration are documented in
+[docs/parent-link-invitations.md](docs/parent-link-invitations.md).
+
 ## Description
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
