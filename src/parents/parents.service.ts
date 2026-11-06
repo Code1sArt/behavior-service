@@ -8,6 +8,7 @@ import {
   ConflictException,
   NotFoundException,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateParentDto } from './dto/create-parent.dto';
@@ -16,6 +17,8 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { LoginDto } from 'src/auth/dto/login.dto';
 import { AddChildDto } from './dto/add-child.dto';
+import { ClassroomParentLinksService } from './classroom-parent-links.service';
+import type { StudentLinkSelectionDto } from './dto/classroom-invitation.dto';
 
 @Injectable()
 export class ParentsService {
@@ -23,7 +26,21 @@ export class ParentsService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private readonly lineIdentity: LineIdentityService,
+    private readonly classroomLinks: ClassroomParentLinksService,
   ) {}
+
+  issueClassroomInvitation(classroomId: number, actor: Actor) {
+    return this.classroomLinks.issue(classroomId, actor);
+  }
+  resolveClassroomInvitation(code: string) {
+    return this.classroomLinks.resolve(code);
+  }
+  addChildren(actor: Actor, students: StudentLinkSelectionDto[]) {
+    return this.classroomLinks.addChildren(actor, students);
+  }
+  removeChild(actor: Actor, studentId: string) {
+    return this.classroomLinks.removeChild(actor, studentId);
+  }
 
   async issueInvitation(dto: CreateLinkInvitationDto, actor: Actor) {
     if (actor.role !== Role.ADMIN && actor.role !== Role.AFFAIRS)
@@ -63,6 +80,12 @@ export class ParentsService {
   ) {
     if (!code)
       throw new ForbiddenException('กรุณาระบุรหัสเชื่อมโยงที่โรงเรียนออกให้');
+    if (/^[a-zA-Z0-9]{5}$/.test(code)) {
+      await this.classroomLinks.validate(tx, [
+        { studentId, invitationCode: code },
+      ]);
+      return;
+    }
     const claimed = await tx.parentLinkInvitation.updateMany({
       where: {
         tokenHash: this.hashCode(code),
@@ -83,8 +106,12 @@ export class ParentsService {
 
   async register(dto: CreateParentDto, actor?: Actor) {
     const admin = actor?.role === Role.ADMIN;
-    if (!admin && !dto.invitationCode)
+    if (!admin && !dto.invitationCode && !dto.students?.length)
       throw new ForbiddenException('กรุณาระบุรหัสเชื่อมโยงที่โรงเรียนออกให้');
+    if (!dto.students?.length && !dto.studentCitizenId)
+      throw new BadRequestException(
+        'กรุณาเลือกนักเรียนในความดูแลอย่างน้อย 1 คน',
+      );
     // A native signup has no LINE identity. A LINE signup must prove ownership to LINE.
     const lineUserId = dto.lineUserId
       ? admin
@@ -94,15 +121,23 @@ export class ParentsService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        const student = await tx.user.findUnique({
-          where: { citizenId: dto.studentCitizenId },
-        });
-        if (!student || student.role !== Role.STUDENT || student.parentId) {
+        const selectedStudents = dto.students?.length
+          ? await this.classroomLinks.validate(tx, dto.students)
+          : null;
+        const student = selectedStudents
+          ? null
+          : await tx.user.findUnique({
+              where: { citizenId: dto.studentCitizenId },
+            });
+        if (
+          !selectedStudents &&
+          (!student || student.role !== Role.STUDENT || student.parentId)
+        ) {
           throw new ConflictException(
             'ไม่สามารถเชื่อมโยงนักเรียน กรุณาติดต่อโรงเรียน',
           );
         }
-        if (!admin)
+        if (!admin && student)
           await this.claimInvitation(
             tx,
             dto.invitationCode,
@@ -119,6 +154,12 @@ export class ParentsService {
             lineUserId,
           },
         });
+        if (selectedStudents) {
+          await this.classroomLinks.attach(tx, parent.id, selectedStudents);
+          return parent;
+        }
+        if (!student)
+          throw new BadRequestException('กรุณาเลือกนักเรียนในความดูแล');
         const linked = await tx.user.updateMany({
           where: { id: student.id, role: Role.STUDENT, parentId: null },
           data: { parentId: parent.id },

@@ -1,7 +1,26 @@
-import { IsString, IsNotEmpty, IsOptional, MinLength } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  MinLength,
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { StudentLinkSelectionDto } from './classroom-invitation.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateParentDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => StudentLinkSelectionDto)
+  students?: StudentLinkSelectionDto[];
+
   @IsOptional()
   @IsString()
   invitationCode?: string;
@@ -33,9 +52,10 @@ export class CreateParentDto {
     example: '110xxxxxxxxxx',
     description: 'รหัสประชาชน/รหัสนักเรียน ของบุตรหลาน',
   })
+  @IsOptional()
   @IsString()
   @IsNotEmpty({ message: 'กรุณาระบุรหัสบุตรหลานเพื่อเชื่อมโยงข้อมูล' })
-  studentCitizenId!: string;
+  studentCitizenId?: string;
 
   @ApiPropertyOptional({
     example: 'U1234567890abcdef...',

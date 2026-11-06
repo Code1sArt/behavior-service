@@ -4,10 +4,16 @@ import { ParentsController } from './parents.controller';
 import { ParentsService } from './parents.service';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { JwtModule } from '@nestjs/jwt';
+import { ClassroomParentLinksService } from './classroom-parent-links.service';
+import { ParentInvitationThrottleGuard } from './parent-invitation-throttle.guard';
 
 @Module({
   controllers: [ParentsController],
-  providers: [ParentsService],
+  providers: [
+    ParentsService,
+    ClassroomParentLinksService,
+    ParentInvitationThrottleGuard,
+  ],
   imports: [
     AuthModule,
     PrismaModule,

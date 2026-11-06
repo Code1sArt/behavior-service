@@ -89,6 +89,26 @@ describe('UsersService', () => {
     expect(service).toBeDefined();
   });
 
+  it('returns all children of a parent across different classrooms', async () => {
+    const children = [
+      { id: 'child-1', firstName: 'First', classroom: { name: 'ม.1/1' } },
+      { id: 'child-2', firstName: 'Second', classroom: { name: 'ม.4/2' } },
+    ];
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'parent',
+      role: Role.PARENT,
+      password: 'hidden',
+      children,
+    });
+    const result = await service.getMe('parent');
+    expect(result.children).toEqual(children);
+    expect(result).not.toHaveProperty('password');
+    const query = prisma.user.findUnique.mock.calls[0][0];
+    expect(query.include.children).toHaveProperty('select.id', true);
+    expect(query.include.children).not.toHaveProperty('take');
+    expect(query.include.children).not.toHaveProperty('where');
+  });
+
   it('loads only advisory classrooms in the active term for both attendance clients', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'teacher',
