@@ -55,7 +55,7 @@ export class ParentsService {
         'นักเรียนมีผู้ปกครองแล้ว กรุณาติดต่อโรงเรียน',
       );
     const invitationCode = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     await this.prisma.parentLinkInvitation.create({
       data: {
         tokenHash: this.hashCode(invitationCode),
