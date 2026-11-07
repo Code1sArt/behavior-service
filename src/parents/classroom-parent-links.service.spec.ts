@@ -62,6 +62,7 @@ describe('shared classroom parent invitations', () => {
     prisma.parentClassroomInvitation.upsert
       .mockRejectedValueOnce({ code: 'P2002' })
       .mockResolvedValue({});
+    const before = Date.now();
     const result = await service.issue(1, {
       userId: 'staff',
       role: Role.AFFAIRS,
@@ -72,9 +73,14 @@ describe('shared classroom parent invitations', () => {
     expect(query.create.tokenHash).toBe(hash(result.invitationCode));
     expect(query.update.tokenHash).toBe(query.create.tokenHash);
     expect(query.create).not.toHaveProperty('invitationCode');
-    expect(result.expiresAt.getTime()).toBeGreaterThan(
-      Date.now() + 23 * 60 * 60 * 1000,
+    expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(
+      before + 14 * 24 * 60 * 60 * 1000,
     );
+    expect(result.expiresAt.getTime()).toBeLessThanOrEqual(
+      Date.now() + 14 * 24 * 60 * 60 * 1000,
+    );
+    expect(query.create.expiresAt).toEqual(result.expiresAt);
+    expect(query.update.expiresAt).toEqual(result.expiresAt);
   });
   it('does not allow a parent to issue codes', async () => {
     await expect(service.issue(1, parent)).rejects.toThrow();

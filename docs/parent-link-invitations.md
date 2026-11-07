@@ -3,8 +3,10 @@
 School staff select a classroom and issue one reusable, case-sensitive code for
 that room. Every code is exactly five characters and contains at least one
 lowercase letter, uppercase letter, and digit from `a-zA-Z0-9`. Codes expire
-after 24 hours. Issuing another code replaces the previous code for that room.
+14 days after issuance. Issuing another code replaces the previous code for that room.
 Only the SHA-256 hash is stored; the plaintext is returned on issuance only.
+The 14-day lifetime applies to newly issued codes. Existing codes retain their
+stored expiry until staff issue a replacement.
 
 ## API
 

@@ -285,7 +285,7 @@ describe('verified parent linking', () => {
     ).rejects.toThrow();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
-  it('issues only a hash in storage with a 24h expiry and parent binding', async () => {
+  it('issues only a hash in storage with a 14-day expiry and parent binding', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'student',
       role: Role.STUDENT,
@@ -322,8 +322,8 @@ describe('verified parent linking', () => {
     expect(data.tokenHash).toHaveLength(64);
     expect(data.tokenHash).not.toBe(result.invitationCode);
     const expiresAt = result.expiresAt.getTime();
-    expect(expiresAt).toBeGreaterThanOrEqual(before + 24 * 60 * 60 * 1000);
-    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60 * 1000);
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 14 * 24 * 60 * 60 * 1000);
+    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 14 * 24 * 60 * 60 * 1000);
   });
   it('still refuses to issue a code for a student with an existing parent', async () => {
     prisma.user.findUnique.mockResolvedValue({

@@ -56,7 +56,7 @@ export class ClassroomParentLinksService {
     for (let attempt = 0; attempt < 5; attempt++) {
       const invitationCode = generateClassroomCode();
       if (hash(invitationCode) === previous?.tokenHash) continue;
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
       const data = {
         tokenHash: hash(invitationCode),
         issuedBy: actor.userId,
