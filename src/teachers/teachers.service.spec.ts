@@ -15,7 +15,7 @@ describe('TeachersService', () => {
       expect.objectContaining({
         where: {
           role: {
-            in: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN],
+            in: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN, Role.EXECUTIVE],
           },
         },
       }),

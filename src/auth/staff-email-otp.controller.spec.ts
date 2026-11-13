@@ -134,6 +134,7 @@ describe.each(['true', 'false'])(
       Role.TEACHER,
       Role.AFFAIRS,
       Role.ADMIN,
+      Role.EXECUTIVE,
       Role.STUDENT,
       Role.PARENT,
     ])('keeps the existing web password contract for %s', async (role) => {
@@ -146,7 +147,7 @@ describe.each(['true', 'false'])(
         expect.objectContaining({ sub: user.id, role }),
       );
     });
-    it.each([Role.TEACHER, Role.AFFAIRS, Role.ADMIN])(
+    it.each([Role.TEACHER, Role.AFFAIRS, Role.ADMIN, Role.EXECUTIVE])(
       'keeps verified LINE auto-login for %s',
       async (role) => {
         const user = await db.user.findUnique({});
@@ -163,7 +164,7 @@ describe.each(['true', 'false'])(
         );
       },
     );
-    it.each([Role.TEACHER, Role.AFFAIRS, Role.ADMIN])(
+    it.each([Role.TEACHER, Role.AFFAIRS, Role.ADMIN, Role.EXECUTIVE])(
       'keeps verified LINE binding for %s',
       async (role) => {
         const user = await db.user.findUnique({});

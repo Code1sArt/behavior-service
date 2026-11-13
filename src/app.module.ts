@@ -22,6 +22,7 @@ import { TeachersModule } from './teachers/teachers.module';
 import { HolidaysModule } from './holidays/holidays.module';
 import { AcademicCalendarModule } from './academic-calendar/academic-calendar.module';
 import { PromotionsModule } from './promotions/promotions.module';
+import { StaffAttendanceModule } from './staff-attendance/staff-attendance.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { PromotionsModule } from './promotions/promotions.module';
     HolidaysModule,
     AcademicCalendarModule,
     PromotionsModule,
+    StaffAttendanceModule,
   ],
   controllers: [AppController, UsersController],
   providers: [AppService, UsersService],

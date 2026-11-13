@@ -11,7 +11,14 @@ enum Role {
   TEACHER
   AFFAIRS
   ADMIN
+  EXECUTIVE
   PARENT
+}
+
+enum StaffAttendanceType {
+  PERSONAL_LEAVE
+  SICK_LEAVE
+  LATE_ARRIVAL
 }
 
 enum AttendanceType {
@@ -97,6 +104,7 @@ model User {
   notificationDevices   NotificationDevice[]
   notificationInbox     NotificationInbox[]
   parentLinkInvitations ParentLinkInvitation[]
+  staffAttendanceNotices StaffAttendanceNotice[]
 
   // Relations
   classroom   Classroom? @relation("StudentClassroom", fields: [classroomId], references: [id])
@@ -551,6 +559,24 @@ model BehaviorRecord {
 
   @@index([termId, classroomId, createdAt])
   @@index([studentId, createdAt])
+}
+
+// การแจ้งลากิจ ลาป่วย หรือขออนุญาตเข้าสายของครู
+model StaffAttendanceNotice {
+  id          String              @id @default(uuid())
+  type        StaffAttendanceType
+  date        DateTime            @db.Date
+  arrivalTime String?             @db.VarChar(5)
+  reason      String              @db.VarChar(1000)
+
+  teacherId String
+  teacher   User   @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teacherId, date])
+  @@index([date, type])
 }
 
 // Native push registrations are independent of LINE account linking.

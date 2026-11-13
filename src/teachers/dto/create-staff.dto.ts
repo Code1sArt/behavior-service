@@ -18,7 +18,7 @@ export class CreateStaffDto {
     @IsNotEmpty()
     lastName!: string;
 
-    @ApiProperty({ enum: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN], example: Role.TEACHER })
+    @ApiProperty({ enum: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN, Role.EXECUTIVE], example: Role.TEACHER })
     @IsEnum(Role)
     @IsNotEmpty()
     role!: Role;
