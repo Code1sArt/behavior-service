@@ -21,6 +21,12 @@ enum StaffAttendanceType {
   LATE_ARRIVAL
 }
 
+enum StaffAttendanceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum AttendanceType {
   ASSEMBLY // เข้าแถว
   AREA // เขตพื้นที่
@@ -104,7 +110,8 @@ model User {
   notificationDevices   NotificationDevice[]
   notificationInbox     NotificationInbox[]
   parentLinkInvitations ParentLinkInvitation[]
-  staffAttendanceNotices StaffAttendanceNotice[]
+  staffAttendanceNotices StaffAttendanceNotice[] @relation("StaffAttendanceTeacher")
+  staffAttendanceReviews StaffAttendanceNotice[] @relation("StaffAttendanceReviewer")
 
   // Relations
   classroom   Classroom? @relation("StudentClassroom", fields: [classroomId], references: [id])
@@ -565,18 +572,27 @@ model BehaviorRecord {
 model StaffAttendanceNotice {
   id          String              @id @default(uuid())
   type        StaffAttendanceType
-  date        DateTime            @db.Date
+  status      StaffAttendanceStatus @default(PENDING)
+  startDate   DateTime            @db.Date
+  endDate     DateTime            @db.Date
   arrivalTime String?             @db.VarChar(5)
   reason      String              @db.VarChar(1000)
 
   teacherId String
-  teacher   User   @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  teacher   User   @relation("StaffAttendanceTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+
+  reviewerId String?
+  reviewer   User?     @relation("StaffAttendanceReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewNote String?   @db.VarChar(1000)
+  reviewedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([teacherId, date])
-  @@index([date, type])
+  @@index([startDate, endDate, type])
+  @@index([teacherId, startDate, endDate])
+  @@index([status, startDate])
+  @@index([reviewerId])
 }
 
 // Native push registrations are independent of LINE account linking.
