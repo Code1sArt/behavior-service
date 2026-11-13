@@ -23,7 +23,7 @@ export class RegisterDto {
     @MinLength(6, { message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' })
     password!: string;
 
-    @IsEnum(Role, { message: 'Role ไม่ถูกต้อง (ต้องเป็น STUDENT, TEACHER, AFFAIRS, ADMIN, PARENT)' })
+    @IsEnum(Role, { message: 'Role ไม่ถูกต้อง (ต้องเป็น STUDENT, TEACHER, AFFAIRS, ADMIN, EXECUTIVE, PARENT)' })
     @ApiProperty({ description: 'บทบาทของผู้ใช้งาน', example: Role.STUDENT })
     role!: Role;
 }

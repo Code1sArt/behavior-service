@@ -56,8 +56,8 @@ export class TeachersController {
 
     // เปิด API ดึงข้อมูลบุคลากร
     @Get('staff')
-    @Roles(Role.ADMIN, Role.AFFAIRS) // อนุญาตให้แอดมินและฝ่ายกิจการดูได้
-    @ApiOperation({ summary: 'ดึงรายชื่อบุคลากรทั้งหมด (ครู, กิจการ)' })
+    @Roles(Role.ADMIN, Role.AFFAIRS, Role.EXECUTIVE)
+    @ApiOperation({ summary: 'ดึงรายชื่อบุคลากรทั้งหมด (ครู, กิจการ, แอดมิน, ผู้บริหาร)' })
     findAllStaff() {
         return this.teachersService.findAllStaff();
     }

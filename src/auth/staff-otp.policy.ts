@@ -1,3 +1,8 @@
 import { Role } from '@prisma/client';
 
-export const STAFF_ROLES: Role[] = [Role.TEACHER, Role.AFFAIRS, Role.ADMIN];
+export const STAFF_ROLES: Role[] = [
+  Role.TEACHER,
+  Role.AFFAIRS,
+  Role.ADMIN,
+  Role.EXECUTIVE,
+];

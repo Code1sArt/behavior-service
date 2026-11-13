@@ -78,6 +78,7 @@ export class TeachersService {
                     let userRole: Role = Role.TEACHER;
                     if (row.role === 'ADMIN') userRole = Role.ADMIN;
                     if (row.role === 'AFFAIRS') userRole = Role.AFFAIRS;
+                    if (row.role === 'EXECUTIVE') userRole = Role.EXECUTIVE;
 
                     // เข้ารหัสผ่านโดยใช้ citizenId เป็นค่าเริ่มต้น
                     const hashedPassword = await bcrypt.hash(row.citizenId.toString(), salt);
@@ -120,7 +121,7 @@ export class TeachersService {
             where: {
                 // กรองเอาเฉพาะ Role ที่เป็นบุคลากรโรงเรียน
                 role: {
-                    in: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN],
+                    in: [Role.TEACHER, Role.AFFAIRS, Role.ADMIN, Role.EXECUTIVE],
                 },
             },
             // เลือกคืนค่าเฉพาะฟิลด์ที่จำเป็น (ไม่คืนค่า password!)
