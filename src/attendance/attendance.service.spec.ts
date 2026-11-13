@@ -18,6 +18,7 @@ describe('AttendanceService', () => {
   const findAttendanceRecords = jest.fn();
   const findAttendanceRecord = jest.fn();
   const findStudents = jest.fn();
+  const findStudent = jest.fn();
   const findPointCategory = jest.fn();
   const createAttendances = jest.fn();
   const createBehaviors = jest.fn();
@@ -36,7 +37,7 @@ describe('AttendanceService', () => {
       findUnique: findAttendanceRecord,
     },
     behaviorRecord: { createMany: createBehaviors },
-    user: { findMany: findStudents },
+    user: { findMany: findStudents, findFirst: findStudent },
     pointCategory: { findUnique: findPointCategory },
     $transaction: runTransaction,
   } as unknown as PrismaService;
@@ -64,6 +65,7 @@ describe('AttendanceService', () => {
     findAttendanceRecords.mockReset();
     findAttendanceRecord.mockReset();
     findStudents.mockReset();
+    findStudent.mockReset();
     findPointCategory.mockReset();
     createAttendances.mockReset();
     createBehaviors.mockReset();
@@ -114,6 +116,39 @@ describe('AttendanceService', () => {
     ).rejects.toThrow(
       new ForbiddenException('นักเรียนดูประวัติการเช็คชื่อได้เฉพาะของตนเอง'),
     );
+    expect(findAttendanceRecords).not.toHaveBeenCalled();
+  });
+
+  it('lets a teacher read attendance for a linked child outside the advisory room', async () => {
+    findStudent.mockResolvedValue({ id: 'child-1' });
+    findAttendanceRecords.mockResolvedValue([]);
+
+    await expect(
+      service.getStudentAttendance('child-1', 'teacher-1', Role.TEACHER),
+    ).resolves.toEqual([]);
+    expect(findStudent).toHaveBeenCalledWith({
+      where: {
+        id: 'child-1',
+        role: Role.STUDENT,
+        OR: [
+          { parentId: 'teacher-1' },
+          {
+            classroom: {
+              advisors: { some: { id: 'teacher-1' } },
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it('still rejects a teacher reading unrelated attendance history', async () => {
+    findStudent.mockResolvedValue(null);
+
+    await expect(
+      service.getStudentAttendance('other', 'teacher-1', Role.TEACHER),
+    ).rejects.toThrow('ห้องที่ปรึกษาหรือบุตรหลาน');
     expect(findAttendanceRecords).not.toHaveBeenCalled();
   });
 

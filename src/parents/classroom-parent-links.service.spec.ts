@@ -132,6 +132,18 @@ describe('shared classroom parent invitations', () => {
     });
     expect(prisma.parentClassroomInvitation.upsert).not.toHaveBeenCalled();
   });
+  it('lets a teacher link children to the same signed-in account', async () => {
+    prisma.user.findUnique.mockResolvedValue({ role: Role.TEACHER });
+    await expect(
+      service.addChildren(
+        { userId: 'teacher', role: Role.TEACHER },
+        selections,
+      ),
+    ).resolves.toMatchObject({ count: 2 });
+    expect(prisma.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { parentId: 'teacher' } }),
+    );
+  });
   it('lets another parent use the same room code for a different unlinked student', async () => {
     prisma.user.findMany
       .mockResolvedValueOnce([{ id: 's1', classroomId: 1 }])
@@ -209,5 +221,13 @@ describe('shared classroom parent invitations', () => {
     await expect(
       service.removeChild(parent, 'someone-elses-child'),
     ).rejects.toThrow('บัญชีนี้');
+  });
+  it('lets a teacher remove only a child linked to that teacher account', async () => {
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    await service.removeChild({ userId: 'teacher', role: Role.TEACHER }, 's1');
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 's1', role: Role.STUDENT, parentId: 'teacher' },
+      data: { parentId: null },
+    });
   });
 });

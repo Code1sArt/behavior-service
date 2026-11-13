@@ -57,14 +57,14 @@ export class ParentsController {
 
   @Patch('children')
   @UseGuards(AuthGuard('jwt'), RolesGuard, ParentInvitationThrottleGuard)
-  @Roles(Role.PARENT)
+  @Roles(Role.PARENT, Role.TEACHER)
   addChildren(@Body() dto: AddChildrenDto, @Request() req: any) {
     return this.parentsService.addChildren(req.user, dto.students);
   }
 
   @Delete('children/:studentId')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.PARENT)
+  @Roles(Role.PARENT, Role.TEACHER)
   removeChild(@Param('studentId') studentId: string, @Request() req: any) {
     return this.parentsService.removeChild(req.user, studentId);
   }

@@ -852,19 +852,20 @@ export class AttendanceService {
     }
 
     if (requesterRole === Role.TEACHER) {
-      const advisedStudent = await this.prisma.user.findFirst({
+      const accessibleStudent = await this.prisma.user.findFirst({
         where: {
           id: studentId,
           role: Role.STUDENT,
-          classroom: {
-            advisors: { some: { id: requesterId } },
-          },
+          OR: [
+            { parentId: requesterId },
+            { classroom: { advisors: { some: { id: requesterId } } } },
+          ],
         },
         select: { id: true },
       });
-      if (!advisedStudent) {
+      if (!accessibleStudent) {
         throw new ForbiddenException(
-          'ครูดูประวัติได้เฉพาะนักเรียนในห้องที่ปรึกษา',
+          'ครูดูประวัติได้เฉพาะนักเรียนในห้องที่ปรึกษาหรือบุตรหลานในความดูแล',
         );
       }
     }
