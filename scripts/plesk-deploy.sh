@@ -57,7 +57,13 @@ case "${DEPLOY_DATABASE_MODE:-skip}" in
     ;;
   migrate)
     if [[ -d prisma/migrations ]] && find prisma/migrations -mindepth 1 -maxdepth 1 -type d | read -r _; then
-      yarn prisma migrate deploy
+      if ! yarn prisma migrate deploy; then
+        # Production previously failed on query 1 of this migration before any
+        # DDL was applied (MySQL error 1553). Mark only that known failed run as
+        # rolled back, then retry with the corrected migration SQL.
+        yarn prisma migrate resolve --rolled-back 20261113110000_staff_attendance_date_ranges
+        yarn prisma migrate deploy
+      fi
     else
       echo "No Prisma migrations found. Skipping database migration."
       echo "Set DEPLOY_DATABASE_MODE=push on the Plesk app env if this project intentionally uses prisma db push."
