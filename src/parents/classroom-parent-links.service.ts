@@ -15,6 +15,7 @@ const LOWER = 'abcdefghijklmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const DIGITS = '0123456789';
 const ALPHABET = LOWER + UPPER + DIGITS;
+const GUARDIAN_ROLES: Role[] = [Role.PARENT, Role.TEACHER];
 const hash = (code: string) => createHash('sha256').update(code).digest('hex');
 const invalidCode = () =>
   new ForbiddenException(
@@ -158,13 +159,14 @@ export class ClassroomParentLinksService {
   }
 
   async addChildren(actor: Actor, selections: StudentLinkSelectionDto[]) {
-    if (actor.role !== Role.PARENT) throw new ForbiddenException();
+    if (!GUARDIAN_ROLES.includes(actor.role)) throw new ForbiddenException();
     return this.prisma.$transaction(async (tx) => {
-      const parent = await tx.user.findUnique({
+      const guardian = await tx.user.findUnique({
         where: { id: actor.userId },
         select: { role: true },
       });
-      if (parent?.role !== Role.PARENT) throw new ForbiddenException();
+      if (!guardian || !GUARDIAN_ROLES.includes(guardian.role))
+        throw new ForbiddenException();
       const students = await this.validate(tx, selections);
       await this.attach(tx, actor.userId, students);
       return {
@@ -175,7 +177,7 @@ export class ClassroomParentLinksService {
   }
 
   async removeChild(actor: Actor, studentId: string) {
-    if (actor.role !== Role.PARENT) throw new ForbiddenException();
+    if (!GUARDIAN_ROLES.includes(actor.role)) throw new ForbiddenException();
     const removed = await this.prisma.user.updateMany({
       where: { id: studentId, role: Role.STUDENT, parentId: actor.userId },
       data: { parentId: null },

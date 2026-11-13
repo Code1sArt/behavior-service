@@ -212,6 +212,23 @@ describe('API permissions through real HTTP + Passport JWT guards', () => {
       's1',
     );
     await request(app.getHttpServer())
+      .patch('/parents/children')
+      .set('Authorization', `Bearer ${token('teacher')}`)
+      .send({ students })
+      .expect(200);
+    expect(parents.addChildren).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'teacher', role: Role.TEACHER }),
+      students,
+    );
+    await request(app.getHttpServer())
+      .delete('/parents/children/s1')
+      .set('Authorization', `Bearer ${token('teacher')}`)
+      .expect(200);
+    expect(parents.removeChild).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'teacher', role: Role.TEACHER }),
+      's1',
+    );
+    await request(app.getHttpServer())
       .delete('/parents/children/s1')
       .set('Authorization', `Bearer ${token('student')}`)
       .expect(403);
