@@ -33,14 +33,14 @@ export class TermsController {
   }
 
   @Get()
-  @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS, Role.STUDENT, Role.PARENT)
+  @Roles(Role.ADMIN, Role.EXECUTIVE, Role.TEACHER, Role.AFFAIRS, Role.STUDENT, Role.PARENT)
   @ApiOperation({ summary: 'ดูรายชื่อภาคเรียน/ปีการศึกษาทั้งหมด' })
   findAll() {
     return this.termsService.findAll();
   }
 
   @Get(':id')
-  @Roles(Role.ADMIN, Role.TEACHER, Role.AFFAIRS, Role.STUDENT, Role.PARENT)
+  @Roles(Role.ADMIN, Role.EXECUTIVE, Role.TEACHER, Role.AFFAIRS, Role.STUDENT, Role.PARENT)
   @ApiOperation({ summary: 'ดูข้อมูลภาคเรียนตาม ID' })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.termsService.findOne(id);
